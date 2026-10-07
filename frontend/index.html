@@ -4,19 +4,122 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart PDF Search</title>
+  <style>
+    body {
+      max-width: 900px;
+      margin: auto;
+      font-family: system-ui;
+    }
+    .result {
+      border-left: 3px solid #4a90e2;
+      padding: 10px;
+      margin-bottom: 10px;
+      background: #f8f9fa;
+    }
+    .result-header {
+      font-weight: bold;
+      color: #4a90e2;
+    }
+    .result-chunk {
+      color: #333;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+    .score {
+      float: right;
+      color: #999;
+      font-size: 13px;
+    }
+    #status {
+      color: #666;
+      margin: 10px 0;
+    }
+  </style>
 </head>
 <body>
   <h1>Smart PDF Search</h1>
+  <p>Загруженный файл: sample.pdf (захардкожен)</p>
 
-  <form>
-    <label for="pdf">Загрузить PDF</label>
-    <input id="pdf" type="file" accept="application/pdf">
-  </form>
-
-  <form>
+  <form id="searchForm">
     <label for="query">Поиск</label>
     <input id="query" type="search" placeholder="Введите запрос">
-    <button type="submit">Искать</button>
+    <button type="submit" id="searchBtn">Искать</button>
   </form>
+
+  <div id="status"></div>
+  <div id="results"></div>
+
+  <script>
+    const form = document.getElementById("searchForm");
+    const queryInput = document.getElementById("query");
+    const statusEl = document.getElementById("status");
+    const resultsEl = document.getElementById("results");
+
+    function truncate(text, maxLength) {
+      if (text.length <= maxLength) {
+        return text;
+      }
+      return text.slice(0, maxLength) + "...";
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const query = queryInput.value.trim();
+      resultsEl.innerHTML = "";
+
+      if (!query) {
+        statusEl.textContent = "Введите запрос";
+        return;
+      }
+
+      statusEl.textContent = "Поиск...";
+
+      try {
+        const response = await fetch("/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, top_k: 5 }),
+        });
+
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+
+        const data = await response.json();
+        const results = data.results || [];
+
+        if (results.length === 0) {
+          statusEl.textContent = "Ничего не найдено";
+          return;
+        }
+
+        statusEl.textContent = "";
+        results.forEach((item) => {
+          const card = document.createElement("div");
+          card.className = "result";
+
+          const header = document.createElement("div");
+          header.className = "result-header";
+          header.textContent = "Результат " + item.rank;
+
+          const score = document.createElement("span");
+          score.className = "score";
+          score.textContent = "score: " + Number(item.score).toFixed(2);
+          header.appendChild(score);
+
+          const chunk = document.createElement("div");
+          chunk.className = "result-chunk";
+          chunk.textContent = truncate(item.chunk || "", 400);
+
+          card.appendChild(header);
+          card.appendChild(chunk);
+          resultsEl.appendChild(card);
+        });
+      } catch (error) {
+        statusEl.textContent = "Ошибка: " + error.message;
+      }
+    });
+  </script>
 </body>
 </html>

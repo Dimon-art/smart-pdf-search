@@ -9,7 +9,7 @@ def main():
     print(f'Длина текста: {len(full_text)}')
 
     # 2. Чанкинг
-    chunks = chunk_text(full_text, chunk_size=80, overlap=20)
+    chunks = chunk_text(full_text, chunk_size=500, overlap=100)
     print(f'Чанков: {len(chunks)}')
 
     # 3. Эмбеддинги и индекс
@@ -36,5 +36,6 @@ def main():
         else:
             print(f'\n{q!r}: нет результатов')
 
+
 if __name__ == '__main__':
-    main()            
+    main()          

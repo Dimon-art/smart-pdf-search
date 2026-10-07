@@ -22,3 +22,7 @@ Thumbs.db
 *.pdf
 .env
 *.log
+# Model cache
+.cache/
+models/
+*.bin

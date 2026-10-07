@@ -21,10 +21,12 @@ def main():
 
     # 4. Сравнение запросов
     queries = [
-        'penalty for late payment',
-        'штраф за просрочку платежа',
-        'force majeure',
-        'обстоятельства непреодолимой силы',
+        'Russian interference',
+        'вмешательство России',
+        'Trump campaign',
+        'предвыборная кампания Трампа',
+        'obstruction of justice',
+        'воспрепятствование правосудию',
     ]
     print('\nСравнение запросов:')
     for q in queries:
@@ -39,3 +41,4 @@ def main():
 
 if __name__ == '__main__':
     main()          
+

@@ -1,3 +1,6 @@
+import json
+import os
+
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -88,3 +91,49 @@ def search(index, model, query: str, chunks: list[str], top_k: int = 5) -> list[
             }
         )
     return results
+
+
+def save_cache(pdf_hash: str, chunks: list[str], embeddings, index, cache_dir: str = "cache") -> None:
+    """Save chunks, embeddings, and FAISS index to disk.
+
+    Writes {pdf_hash}_chunks.json, {pdf_hash}_embeddings.npy, and
+    {pdf_hash}_faiss.index under cache_dir. Creates the directory if needed.
+    Prints a warning on failure instead of raising.
+    """
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        chunks_path = os.path.join(cache_dir, f"{pdf_hash}_chunks.json")
+        embeddings_path = os.path.join(cache_dir, f"{pdf_hash}_embeddings.npy")
+        index_path = os.path.join(cache_dir, f"{pdf_hash}_faiss.index")
+        with open(chunks_path, "w", encoding="utf-8") as file:
+            json.dump(chunks, file, ensure_ascii=False, indent=2)
+        np.save(embeddings_path, embeddings)
+        faiss.write_index(index, index_path)
+    except Exception as exc:
+        print(f"Warning: failed to save cache: {exc}")
+
+
+def load_cache(pdf_hash: str, cache_dir: str = "cache"):
+    """Load cached chunks, embeddings, and FAISS index from disk.
+
+    Returns (chunks, embeddings, index) when all three files exist,
+    otherwise None. Returns None on any load error.
+    """
+    chunks_path = os.path.join(cache_dir, f"{pdf_hash}_chunks.json")
+    embeddings_path = os.path.join(cache_dir, f"{pdf_hash}_embeddings.npy")
+    index_path = os.path.join(cache_dir, f"{pdf_hash}_faiss.index")
+    if not (
+        os.path.exists(chunks_path)
+        and os.path.exists(embeddings_path)
+        and os.path.exists(index_path)
+    ):
+        return None
+
+    try:
+        with open(chunks_path, encoding="utf-8") as file:
+            chunks = json.load(file)
+        embeddings = np.load(embeddings_path)
+        index = faiss.read_index(index_path)
+        return (chunks, embeddings, index)
+    except Exception:
+        return None

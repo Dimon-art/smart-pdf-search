@@ -5,74 +5,248 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart PDF Search</title>
   <style>
+    * { box-sizing: border-box; }
     body {
-      max-width: 900px;
-      margin: auto;
-      font-family: system-ui;
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
     }
+    #sidebar {
+      width: 420px;
+      padding: 15px;
+      overflow-y: auto;
+      border-right: 1px solid #e0e0e0;
+      background: #fafafa;
+    }
+    #viewer {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      background: #525659;
+      text-align: center;
+    }
+    h1 { font-size: 20px; margin: 0 0 15px 0; }
+    .query-block { display: flex; gap: 8px; margin-bottom: 15px; }
+    #query {
+      flex: 1;
+      padding: 8px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #searchBtn {
+      padding: 8px 16px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #searchBtn:hover { background: #3a7bc8; }
+    #status { color: #666; margin-bottom: 10px; font-size: 14px; }
     .result {
       border-left: 3px solid #4a90e2;
       padding: 10px;
       margin-bottom: 10px;
-      background: #f8f9fa;
+      background: white;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: background 0.15s;
     }
+    .result:hover { background: #f0f7ff; }
+    .result.active { background: #e6f0fb; border-left-color: #ff6b35; }
     .result-header {
       font-weight: bold;
       color: #4a90e2;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
     }
+    .score { color: #999; font-size: 13px; font-weight: normal; }
+    .pages { color: #666; font-size: 12px; margin-bottom: 5px; }
     .result-chunk {
       color: #333;
-      font-size: 14px;
-      margin-top: 5px;
-    }
-    .score {
-      float: right;
-      color: #999;
       font-size: 13px;
+      line-height: 1.4;
     }
-    #status {
-      color: #666;
-      margin: 10px 0;
+    .page-wrapper {
+      position: relative;
+      display: inline-block;
+      margin: 10px auto;
+      background: white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .page-wrapper canvas { display: block; }
+    .highlight-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+    }
+    .highlight {
+      position: absolute;
+      background: rgba(255, 215, 0, 0.35);
+      border: 1px solid rgba(255, 140, 0, 0.7);
+      border-radius: 2px;
+    }
+    .page-number {
+      position: absolute;
+      top: -22px;
+      right: 0;
+      font-size: 12px;
+      color: #ccc;
     }
   </style>
 </head>
 <body>
-  <h1>Smart PDF Search</h1>
-  <p>Загруженный файл: sample.pdf (захардкожен)</p>
+  <div id="sidebar">
+    <h1>Smart PDF Search</h1>
+    <div class="query-block">
+      <input id="query" type="search" placeholder="Введите запрос..." autofocus>
+      <button id="searchBtn">Искать</button>
+    </div>
+    <div id="status"></div>
+    <div id="results"></div>
+  </div>
+  <div id="viewer"></div>
 
-  <form id="searchForm">
-    <label for="query">Поиск</label>
-    <input id="query" type="search" placeholder="Введите запрос">
-    <button type="submit" id="searchBtn">Искать</button>
-  </form>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs" type="module"></script>
+  <script type="module">
+    import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs";
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
 
-  <div id="status"></div>
-  <div id="results"></div>
-
-  <script>
-    const form = document.getElementById("searchForm");
     const queryInput = document.getElementById("query");
+    const searchBtn = document.getElementById("searchBtn");
     const statusEl = document.getElementById("status");
     const resultsEl = document.getElementById("results");
+    const viewerEl = document.getElementById("viewer");
 
-    function truncate(text, maxLength) {
-      if (text.length <= maxLength) {
-        return text;
+    let pdfDoc = null;
+    const pageWrappers = {};
+    const highlightLayers = {};
+
+    async function loadPdf() {
+      try {
+        pdfDoc = await pdfjsLib.getDocument("/static/sample.pdf").promise;
+        for (let num = 1; num <= pdfDoc.numPages; num++) {
+          await renderPage(num);
+        }
+        console.log("PDF загружен:", pdfDoc.numPages, "страниц");
+      } catch (err) {
+        console.error("Ошибка загрузки PDF:", err);
+        statusEl.textContent = "Не удалось загрузить PDF: " + err.message;
       }
-      return text.slice(0, maxLength) + "...";
     }
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
+    async function renderPage(num) {
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale: 0.7 });
 
+      const wrapper = document.createElement("div");
+      wrapper.className = "page-wrapper";
+      wrapper.style.width = viewport.width + "px";
+      wrapper.style.height = viewport.height + "px";
+      wrapper.id = "page-" + num;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      const ctx = canvas.getContext("2d");
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const highlightLayer = document.createElement("div");
+      highlightLayer.className = "highlight-layer";
+      highlightLayer.style.width = viewport.width + "px";
+      highlightLayer.style.height = viewport.height + "px";
+
+      const pageNumber = document.createElement("div");
+      pageNumber.className = "page-number";
+      pageNumber.textContent = "Стр. " + num;
+
+      wrapper.appendChild(canvas);
+      wrapper.appendChild(highlightLayer);
+      wrapper.appendChild(pageNumber);
+      viewerEl.appendChild(wrapper);
+
+      pageWrappers[num] = wrapper;
+      highlightLayers[num] = {
+        el: highlightLayer,
+        viewport: viewport,
+        pdfPage: page,
+      };
+    }
+
+    function clearHighlights() {
+      for (const num in highlightLayers) {
+        highlightLayers[num].el.innerHTML = "";
+      }
+    }
+
+    async function highlightResult(result) {
+      clearHighlights();
+      if (!result.bboxes || !result.bboxes.length) return;
+
+      const byPage = {};
+      for (const b of result.bboxes) {
+        if (!byPage[b.page]) byPage[b.page] = [];
+        byPage[b.page].push(b.bbox);
+      }
+
+      let firstPage = null;
+      for (const pageNumStr in byPage) {
+        const pageNum = parseInt(pageNumStr, 10);
+        const layer = highlightLayers[pageNum];
+        if (!layer) continue;
+
+        const pdfPage = layer.pdfPage;
+        const viewport = pdfPage.getViewport({ scale: 0.7 });
+        const [vx0, vy0] = viewport.convertToViewportPoint(0, 0);
+        const [vx1, vy1] = viewport.convertToViewportPoint(1, 1);
+        const scaleX = vx1 - vx0;
+        const scaleY = vy1 - vy0;
+
+        for (const bbox of byPage[pageNumStr]) {
+          const [x0, y0, x1, y1] = bbox;
+          const [cx0, cy0] = viewport.convertToViewportPoint(x0, y0);
+          const [cx1, cy1] = viewport.convertToViewportPoint(x1, y1);
+
+          const left = Math.min(cx0, cx1);
+          const top = Math.min(cy0, cy1);
+          const width = Math.abs(cx1 - cx0);
+          const height = Math.abs(cy1 - cy0);
+
+          const div = document.createElement("div");
+          div.className = "highlight";
+          div.style.left = left + "px";
+          div.style.top = top + "px";
+          div.style.width = width + "px";
+          div.style.height = height + "px";
+          layer.el.appendChild(div);
+        }
+
+        if (firstPage === null || pageNum < firstPage) firstPage = pageNum;
+      }
+
+      if (firstPage !== null) {
+        const target = pageWrappers[firstPage];
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
+    async function doSearch() {
       const query = queryInput.value.trim();
-      resultsEl.innerHTML = "";
-
       if (!query) {
         statusEl.textContent = "Введите запрос";
         return;
       }
 
+      resultsEl.innerHTML = "";
+      clearHighlights();
       statusEl.textContent = "Поиск...";
 
       try {
@@ -82,44 +256,63 @@
           body: JSON.stringify({ query, top_k: 5 }),
         });
 
-        if (!response.ok) {
-          throw new Error("HTTP " + response.status);
-        }
+        if (!response.ok) throw new Error("HTTP " + response.status);
 
         const data = await response.json();
         const results = data.results || [];
 
-        if (results.length === 0) {
+        if (!results.length) {
           statusEl.textContent = "Ничего не найдено";
           return;
         }
 
-        statusEl.textContent = "";
-        results.forEach((item) => {
+        statusEl.textContent = "Найдено: " + results.length;
+
+        results.forEach((item, i) => {
           const card = document.createElement("div");
           card.className = "result";
+          card.dataset.index = i;
 
           const header = document.createElement("div");
           header.className = "result-header";
-          header.textContent = "Результат " + item.rank;
+          header.innerHTML =
+            "<span>#" + item.rank + "</span>" +
+            "<span class='score'>score " + Number(item.score).toFixed(2) + "</span>";
 
-          const score = document.createElement("span");
-          score.className = "score";
-          score.textContent = "score: " + Number(item.score).toFixed(2);
-          header.appendChild(score);
+          const pages = document.createElement("div");
+          pages.className = "pages";
+          pages.textContent = "Страницы: " + (item.pages || []).join(", ");
 
           const chunk = document.createElement("div");
           chunk.className = "result-chunk";
-          chunk.textContent = truncate(item.chunk || "", 400);
+          const text = item.chunk || "";
+          chunk.textContent = text.length > 300 ? text.slice(0, 300) + "..." : text;
 
           card.appendChild(header);
+          card.appendChild(pages);
           card.appendChild(chunk);
+
+          card.addEventListener("click", () => {
+            document.querySelectorAll(".result").forEach((c) => c.classList.remove("active"));
+            card.classList.add("active");
+            highlightResult(item);
+          });
+
           resultsEl.appendChild(card);
         });
-      } catch (error) {
-        statusEl.textContent = "Ошибка: " + error.message;
+
+        document.querySelector(".result").click();
+      } catch (err) {
+        statusEl.textContent = "Ошибка: " + err.message;
       }
+    }
+
+    searchBtn.addEventListener("click", doSearch);
+    queryInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doSearch();
     });
+
+    loadPdf();
   </script>
 </body>
 </html>

@@ -77,6 +77,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+@app.get("/static/sample.pdf")
+def serve_pdf():
+    """Serve the source PDF for the viewer."""
+    return FileResponse(PDF_PATH, media_type="application/pdf")
 
 @app.get("/")
 def index():

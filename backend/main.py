@@ -7,9 +7,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
-from services.pdf_parser import extract_pages_with_bbox, clean_text
+from services.pdf_parser import extract_blocks_with_pages, clean_text
 from services.embedder import (
-    chunk_text,
+    chunk_blocks_with_pages,
     build_embeddings,
     build_faiss_index,
     search,
@@ -50,12 +50,12 @@ def startup() -> None:
         model = SentenceTransformer(MODEL_NAME)
     else:
         print("Кэш не найден, парсим PDF...")
-        pages = extract_pages_with_bbox(str(PDF_PATH))
-        full_text = clean_text(" ".join(b["text"] for p in pages for b in p["blocks"]))
-        print(f"Длина текста: {len(full_text)}")
-        chunks = chunk_text(full_text, chunk_size=500, overlap=100)
+        blocks = extract_blocks_with_pages(str(PDF_PATH))
+        print(f"Блоков: {len(blocks)}")
+        chunks = chunk_blocks_with_pages(blocks, chunk_size=500, overlap=100)
         print(f"Чанков: {len(chunks)}")
-        embeddings, model = build_embeddings(chunks)
+        texts = [c["text"] for c in chunks]
+        embeddings, model = build_embeddings(texts)
         print(f"Размер эмбеддингов: {embeddings.shape}")
         index = build_faiss_index(embeddings)
         print(f"FAISS-индекс: {index.ntotal} векторов")
@@ -93,5 +93,24 @@ def search_pdf(request: SearchRequest):
         raise HTTPException(status_code=400, detail="query не должен быть пустым")
 
     print(f"Поиск: {request.query!r}, top_k={request.top_k}")
-    results = search(INDEX, MODEL, request.query, CHUNKS, top_k=request.top_k)
+
+    texts = [c["text"] for c in CHUNKS]
+    raw_results = search(INDEX, MODEL, request.query, texts, top_k=request.top_k)
+
+    results = []
+    for r in raw_results:
+        idx = next(
+            (i for i, c in enumerate(CHUNKS) if c["text"] == r["chunk"]),
+            None,
+        )
+        item = {
+            "rank": r["rank"],
+            "score": r["score"],
+            "chunk": r["chunk"],
+        }
+        if idx is not None:
+            item["pages"] = CHUNKS[idx]["pages"]
+            item["bboxes"] = CHUNKS[idx]["bboxes"]
+        results.append(item)
+
     return {"query": request.query, "results": results}

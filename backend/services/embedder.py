@@ -137,3 +137,81 @@ def load_cache(pdf_hash: str, cache_dir: str = "cache"):
         return (chunks, embeddings, index)
     except Exception:
         return None
+
+
+def chunk_blocks_with_pages(
+    blocks: list[dict],
+    chunk_size: int = 500,
+    overlap: int = 100,
+) -> list[dict]:
+    """Разбивает блоки PDF на чанки с сохранением привязки к страницам.
+
+    Args:
+        blocks: список блоков от extract_blocks_with_pages — каждый
+            {"text": str, "bbox": [x0, y0, x1, y1], "page": int}.
+        chunk_size: количество слов в чанке.
+        overlap: перекрытие между соседними чанками (в словах).
+
+    Returns:
+        Список чанков вида:
+        {
+            "text": str,
+            "pages": list[int],       # уникальные номера страниц, отсортированные
+            "bboxes": list[dict],     # [{"page": int, "bbox": [...]}, ...]
+        }
+        Пустые чанки не добавляются.
+    """
+    if not blocks:
+        return []
+
+    # Собираем плоский список слов с привязкой к блоку
+    words = []
+    word_block_idx = []
+    for block_idx, block in enumerate(blocks):
+        block_words = block["text"].split()
+        for word in block_words:
+            words.append(word)
+            word_block_idx.append(block_idx)
+
+    if not words:
+        return []
+
+    step = chunk_size - overlap
+    if step <= 0:
+        step = chunk_size
+
+    chunks = []
+    for start in range(0, len(words), step):
+        end = start + chunk_size
+        window_words = words[start:end]
+        if not window_words:
+            continue
+
+        chunk_text = " ".join(window_words).strip()
+        if not chunk_text:
+            continue
+
+        # Какие блоки попали в окно
+        block_indices_in_window = sorted(set(word_block_idx[start:end]))
+
+        pages = []
+        bboxes = []
+        for idx in block_indices_in_window:
+            block = blocks[idx]
+            if block["page"] not in pages:
+                pages.append(block["page"])
+            bboxes.append({
+                "page": block["page"],
+                "bbox": block["bbox"],
+            })
+
+        chunks.append({
+            "text": chunk_text,
+            "pages": sorted(pages),
+            "bboxes": bboxes,
+        })
+
+        if end >= len(words):
+            break
+
+    return chunks

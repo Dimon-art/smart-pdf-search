@@ -88,3 +88,32 @@ def get_pdf_metadata(pdf_path: str) -> dict:
         return {}
     finally:
         doc.close()
+
+
+def extract_blocks_with_pages(pdf_path: str) -> list[dict]:
+    """Извлекает текстовые блоки из PDF с указанием номера страницы.
+
+    Args:
+        pdf_path: Путь к PDF-файлу.
+
+    Returns:
+        Плоский список текстовых блоков вида:
+        {"text": str, "bbox": [x0, y0, x1, y1], "page": int}.
+
+        При пустом или повреждённом PDF возвращается пустой список.
+    """
+    pages = extract_pages_with_bbox(pdf_path)
+
+    blocks = []
+    for page in pages:
+        page_number = page["page_number"]
+        for block in page.get("blocks", []):
+            if block.get("block_type") != 0:
+                continue
+            blocks.append({
+                "text": block["text"],
+                "bbox": block["bbox"],
+                "page": page_number,
+            })
+
+    return blocks

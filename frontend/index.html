@@ -27,7 +27,39 @@
       background: #525659;
       text-align: center;
     }
-    h1 { font-size: 20px; margin: 0 0 15px 0; }
+    h1 { font-size: 20px; margin: 0 0 10px 0; }
+    .pdf-name {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 15px;
+      word-break: break-all;
+    }
+    .upload-block {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #eef5ff;
+      border-radius: 4px;
+      border: 1px dashed #4a90e2;
+    }
+    .upload-block label {
+      display: block;
+      font-size: 13px;
+      color: #4a90e2;
+      cursor: pointer;
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+    .upload-block input[type="file"] {
+      display: block;
+      font-size: 12px;
+      width: 100%;
+    }
+    #uploadStatus {
+      font-size: 12px;
+      color: #555;
+      margin-top: 6px;
+      min-height: 15px;
+    }
     .query-block { display: flex; gap: 8px; margin-bottom: 15px; }
     #query {
       flex: 1;
@@ -106,6 +138,14 @@
 <body>
   <div id="sidebar">
     <h1>Smart PDF Search</h1>
+    <div class="pdf-name" id="pdfName">загрузка...</div>
+
+    <div class="upload-block">
+      <label for="pdfFile">Загрузить свой PDF</label>
+      <input id="pdfFile" type="file" accept="application/pdf">
+      <div id="uploadStatus"></div>
+    </div>
+
     <div class="query-block">
       <input id="query" type="search" placeholder="Введите запрос..." autofocus>
       <button id="searchBtn">Искать</button>
@@ -125,14 +165,34 @@
     const statusEl = document.getElementById("status");
     const resultsEl = document.getElementById("results");
     const viewerEl = document.getElementById("viewer");
+    const pdfNameEl = document.getElementById("pdfName");
+    const pdfFileInput = document.getElementById("pdfFile");
+    const uploadStatusEl = document.getElementById("uploadStatus");
 
     let pdfDoc = null;
-    const pageWrappers = {};
-    const highlightLayers = {};
+    let pageWrappers = {};
+    let highlightLayers = {};
+
+    async function updatePdfName() {
+      try {
+        const r = await fetch("/status");
+        const data = await r.json();
+        pdfNameEl.textContent =
+          (data.pdf_name || "PDF") + " · чанков: " + (data.chunks_count || 0);
+      } catch (err) {
+        pdfNameEl.textContent = "PDF";
+      }
+    }
 
     async function loadPdf() {
       try {
-        pdfDoc = await pdfjsLib.getDocument("/static/sample.pdf").promise;
+        // Очищаем viewer и словари
+        viewerEl.innerHTML = "";
+        pageWrappers = {};
+        highlightLayers = {};
+
+        const cacheBuster = "?t=" + Date.now();
+        pdfDoc = await pdfjsLib.getDocument("/static/current.pdf" + cacheBuster).promise;
         for (let num = 1; num <= pdfDoc.numPages; num++) {
           await renderPage(num);
         }
@@ -175,11 +235,7 @@
       viewerEl.appendChild(wrapper);
 
       pageWrappers[num] = wrapper;
-      highlightLayers[num] = {
-        el: highlightLayer,
-        viewport: viewport,
-        pdfPage: page,
-      };
+      highlightLayers[num] = { el: highlightLayer, pdfPage: page };
     }
 
     function clearHighlights() {
@@ -204,8 +260,7 @@
         const layer = highlightLayers[pageNum];
         if (!layer) continue;
 
-        const pdfPage = layer.pdfPage;
-        const viewport = pdfPage.getViewport({ scale: 0.7 });
+        const viewport = layer.pdfPage.getViewport({ scale: 0.7 });
 
         for (const bbox of byPage[pageNumStr]) {
           const [x0, y0, x1, y1] = bbox;
@@ -312,11 +367,55 @@
       }
     }
 
+    async function handleUpload() {
+      const file = pdfFileInput.files[0];
+      if (!file) return;
+
+      if (!file.name.toLowerCase().endsWith(".pdf")) {
+        uploadStatusEl.textContent = "Только PDF-файлы";
+        return;
+      }
+
+      uploadStatusEl.textContent =
+        "Загрузка: " + file.name + " (" + (file.size / 1024 / 1024).toFixed(1) + " МБ)...";
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const response = await fetch("/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.detail || "HTTP " + response.status);
+        }
+
+        const data = await response.json();
+        uploadStatusEl.textContent =
+          "Готово: " + data.pdf_name + " (чанков: " + data.chunks_count + ")";
+
+        // Перезагружаем PDF и обновляем имя
+        await updatePdfName();
+        await loadPdf();
+        resultsEl.innerHTML = "";
+        statusEl.textContent = "PDF обновлён. Введите запрос.";
+      } catch (err) {
+        uploadStatusEl.textContent = "Ошибка: " + err.message;
+      } finally {
+        pdfFileInput.value = "";
+      }
+    }
+
     searchBtn.addEventListener("click", doSearch);
     queryInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") doSearch();
     });
+    pdfFileInput.addEventListener("change", handleUpload);
 
+    updatePdfName();
     loadPdf();
   </script>
 </body>

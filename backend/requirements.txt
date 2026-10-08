@@ -3,3 +3,4 @@ uvicorn
 pymupdf
 sentence-transformers
 faiss-cpu
+python-multipart

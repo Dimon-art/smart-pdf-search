@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart PDF Search</title>
+  <title>Умный поиск на страницах</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -14,7 +14,7 @@
       overflow: hidden;
     }
     #sidebar {
-      width: 420px;
+      width: 440px;
       padding: 15px;
       overflow-y: auto;
       border-right: 1px solid #e0e0e0;
@@ -122,7 +122,27 @@
       color: #333;
       font-size: 13px;
       line-height: 1.4;
+      margin-bottom: 8px;
     }
+    .result-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .btn-small {
+      padding: 5px 12px;
+      font-size: 12px;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      background: #f0f0f0;
+      color: #333;
+    }
+    .btn-small:hover { background: #e0e0e0; }
+    .btn-small.primary {
+      background: #ff8c42;
+      color: white;
+    }
+    .btn-small.primary:hover { background: #e67a30; }
     .page-wrapper {
       position: relative;
       display: inline-block;
@@ -150,11 +170,126 @@
       font-size: 12px;
       color: #ccc;
     }
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal {
+      background: white;
+      border-radius: 6px;
+      padding: 20px;
+      width: 640px;
+      max-width: 90vw;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    .modal h2 {
+      margin: 0 0 15px 0;
+      font-size: 18px;
+    }
+    .modal-field {
+      margin-bottom: 12px;
+    }
+    .modal-field label {
+      display: block;
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 4px;
+    }
+    .modal-field input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .matches-list {
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+    .match-item {
+      padding: 8px 12px;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      font-size: 13px;
+    }
+    .match-item:last-child { border-bottom: none; }
+    .match-item input[type="checkbox"] {
+      margin-top: 3px;
+      flex-shrink: 0;
+    }
+    .match-item label {
+      cursor: pointer;
+      flex: 1;
+      line-height: 1.4;
+    }
+    .match-meta {
+      color: #888;
+      font-size: 12px;
+      margin-right: 6px;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .btn {
+      padding: 8px 18px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .btn-primary {
+      background: #4a90e2;
+      color: white;
+    }
+    .btn-primary:hover { background: #3a7bc8; }
+    .btn-primary:disabled { background: #aaa; cursor: not-allowed; }
+    .btn-secondary {
+      background: #f0f0f0;
+      color: #333;
+    }
+    .btn-secondary:hover { background: #e0e0e0; }
+    .modal-status {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #666;
+    }
+    .success-banner {
+      display: none;
+      background: #e8f5e9;
+      border: 1px solid #66bb6a;
+      color: #2e7d32;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    .success-banner.visible { display: block; }
+    .success-banner a {
+      color: #2e7d32;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
   <div id="sidebar">
-    <h1>Smart PDF Search</h1>
+    <h1>Умный поиск на страницах</h1>
     <div class="pdf-name" id="pdfName">загрузка...</div>
 
     <div class="upload-block">
@@ -174,6 +309,35 @@
     <div id="results"></div>
   </div>
   <div id="viewer"></div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <h2 id="modalTitle">Замена текста</h2>
+
+      <div class="modal-field">
+        <label>Искать (в PDF):</label>
+        <input id="modalOldText" type="text" readonly>
+      </div>
+
+      <div class="modal-field">
+        <label>Заменить на:</label>
+        <input id="modalNewText" type="text" placeholder="Введите новый текст...">
+      </div>
+
+      <div class="modal-field">
+        <label>Найденные совпадения (<span id="matchCount">0</span>):</label>
+        <div class="matches-list" id="matchesList"></div>
+      </div>
+
+      <div class="modal-status" id="modalStatus"></div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modalCancel">Отмена</button>
+        <button class="btn btn-primary" id="modalReplace" disabled>Заменить выбранные</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module">
     import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs";
@@ -203,11 +367,21 @@
     const progressBar = document.getElementById("progressBar");
     const progressFill = document.getElementById("progressFill");
 
+    const modalOverlay = document.getElementById("modalOverlay");
+    const modalTitle = document.getElementById("modalTitle");
+    const modalOldText = document.getElementById("modalOldText");
+    const modalNewText = document.getElementById("modalNewText");
+    const matchesList = document.getElementById("matchesList");
+    const matchCount = document.getElementById("matchCount");
+    const modalStatus = document.getElementById("modalStatus");
+    const modalCancel = document.getElementById("modalCancel");
+    const modalReplace = document.getElementById("modalReplace");
+
     let pdfDoc = null;
     let pageWrappers = {};
     let highlightLayers = {};
     let pollTimer = null;
-    let lastPdfName = null;
+    let currentOldText = "";
 
     async function fetchStatus() {
       const r = await fetch("/status");
@@ -385,9 +559,21 @@
           const text = item.chunk || "";
           chunk.textContent = text.length > 300 ? text.slice(0, 300) + "..." : text;
 
+          const actions = document.createElement("div");
+          actions.className = "result-actions";
+          const replaceBtn = document.createElement("button");
+          replaceBtn.className = "btn-small primary";
+          replaceBtn.textContent = "Найти и заменить";
+          replaceBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            openReplaceModal();
+          });
+          actions.appendChild(replaceBtn);
+
           card.appendChild(header);
           card.appendChild(pages);
           card.appendChild(chunk);
+          card.appendChild(actions);
 
           card.addEventListener("click", () => {
             document.querySelectorAll(".result").forEach((c) => c.classList.remove("active"));
@@ -477,7 +663,6 @@
           throw new Error(err.detail || "HTTP " + response.status);
         }
 
-        // Начинаем polling
         stopPolling();
         pollTimer = setInterval(pollStatus, 2000);
         pollStatus();
@@ -488,6 +673,147 @@
         pdfFileInput.value = "";
       }
     }
+
+    /* ---------- Replace modal ---------- */
+
+    async function openReplaceModal() {
+      const query = queryInput.value.trim();
+      if (!query) {
+        statusEl.textContent = "Сначала введите запрос";
+        return;
+      }
+
+      currentOldText = query;
+      modalOldText.value = query;
+      modalNewText.value = "";
+      matchesList.innerHTML = "";
+      matchCount.textContent = "0";
+      modalStatus.textContent = "Поиск совпадений...";
+      modalReplace.disabled = true;
+      modalOverlay.classList.add("visible");
+
+      try {
+        const response = await fetch("/find_matches", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ old_text: query }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.detail || "HTTP " + response.status);
+        }
+
+        const data = await response.json();
+        const matches = data.matches || [];
+        matchCount.textContent = String(matches.length);
+
+        if (!matches.length) {
+          modalStatus.textContent = "Совпадений не найдено";
+          return;
+        }
+
+        modalStatus.textContent = "";
+
+        matches.forEach((m) => {
+          const row = document.createElement("div");
+          row.className = "match-item";
+
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = true;
+          cb.dataset.id = String(m.id);
+
+          const lbl = document.createElement("label");
+          const meta = document.createElement("span");
+          meta.className = "match-meta";
+          meta.textContent = "Стр. " + (m.page + 1) + " · ";
+          lbl.appendChild(meta);
+          lbl.appendChild(document.createTextNode(m.context || "(без контекста)"));
+          lbl.prepend(cb);
+
+          cb.addEventListener("change", updateReplaceBtnState);
+
+          row.appendChild(lbl);
+          matchesList.appendChild(row);
+        });
+
+        updateReplaceBtnState();
+        modalNewText.focus();
+      } catch (err) {
+        modalStatus.textContent = "Ошибка: " + err.message;
+      }
+    }
+
+    function updateReplaceBtnState() {
+      const anyChecked = matchesList.querySelector("input[type=checkbox]:checked") !== null;
+      const hasNew = modalNewText.value.trim().length > 0;
+      modalReplace.disabled = !(anyChecked && hasNew);
+    }
+
+    function closeModal() {
+      modalOverlay.classList.remove("visible");
+      modalStatus.textContent = "";
+      matchesList.innerHTML = "";
+    }
+
+    async function doReplace() {
+      const newText = modalNewText.value.trim();
+      if (!newText) {
+        modalStatus.textContent = "Введите текст для замены";
+        return;
+      }
+
+      const selected = Array.from(
+        matchesList.querySelectorAll("input[type=checkbox]:checked")
+      ).map((cb) => parseInt(cb.dataset.id, 10));
+
+      if (!selected.length) {
+        modalStatus.textContent = "Не выбрано ни одного совпадения";
+        return;
+      }
+
+      modalReplace.disabled = true;
+      modalStatus.textContent = "Замена...";
+
+      try {
+        const response = await fetch("/replace", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            old_text: currentOldText,
+            new_text: newText,
+            selected_ids: selected,
+          }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.detail || "HTTP " + response.status);
+        }
+
+        const data = await response.json();
+        const dlUrl = data.download_url + "?t=" + Date.now();
+
+        let msg = "Заменено: " + data.replaced_count;
+        if (data.skipped_count > 0) {
+          msg += ", пропущено: " + data.skipped_count + " (не помещается)";
+        }
+
+        modalStatus.innerHTML =
+          msg + ' · <a href="' + dlUrl + '" download>Скачать PDF</a>';
+      } catch (err) {
+        modalStatus.textContent = "Ошибка: " + err.message;
+        modalReplace.disabled = false;
+      }
+    }
+
+    modalCancel.addEventListener("click", closeModal);
+    modalReplace.addEventListener("click", doReplace);
+    modalNewText.addEventListener("input", updateReplaceBtnState);
+    modalOverlay.addEventListener("click", (e) => {
+      if (e.target === modalOverlay) closeModal();
+    });
 
     searchBtn.addEventListener("click", doSearch);
     queryInput.addEventListener("keydown", (e) => {

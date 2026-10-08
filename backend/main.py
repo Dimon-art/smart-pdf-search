@@ -16,12 +16,14 @@ from services.embedder import (
     save_cache,
     load_cache,
 )
+from services.pdf_editor import find_matches, replace_matches
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_PATH = BASE_DIR / "frontend" / "index.html"
 UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 CURRENT_PDF = UPLOADS_DIR / "current.pdf"
+EDITED_PDF = UPLOADS_DIR / "edited.pdf"
 DEFAULT_PDF = BASE_DIR / "sample.pdf"
 MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
@@ -31,10 +33,9 @@ INDEX = None
 MODEL = None
 CURRENT_PDF_NAME = None
 
-# Состояние фоновой задачи индексации
 JOB_STATE = {
     "running": False,
-    "stage": "idle",      # idle | parsing | chunking | embedding | saving | ready | error
+    "stage": "idle",
     "progress": 0,
     "error": None,
 }
@@ -43,6 +44,16 @@ JOB_STATE = {
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 5
+
+
+class FindMatchesRequest(BaseModel):
+    old_text: str
+
+
+class ReplaceRequest(BaseModel):
+    old_text: str
+    new_text: str
+    selected_ids: list[int]
 
 
 def _set_stage(stage: str, progress: int) -> None:
@@ -119,6 +130,13 @@ def _process_upload(pdf_bytes: bytes, pdf_name: str) -> None:
         JOB_STATE["running"] = False
 
 
+def _active_pdf_path() -> Path:
+    """Return the currently active PDF path (uploaded or default)."""
+    if CURRENT_PDF.exists():
+        return CURRENT_PDF
+    return DEFAULT_PDF
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run startup() before serving requests."""
@@ -138,11 +156,15 @@ def index():
 @app.get("/static/current.pdf")
 def serve_current_pdf():
     """Serve the currently active PDF."""
-    if CURRENT_PDF.exists():
-        return FileResponse(CURRENT_PDF, media_type="application/pdf")
-    if DEFAULT_PDF.exists():
-        return FileResponse(DEFAULT_PDF, media_type="application/pdf")
-    raise HTTPException(status_code=404, detail="PDF не найден")
+    return FileResponse(_active_pdf_path(), media_type="application/pdf")
+
+
+@app.get("/static/edited.pdf")
+def serve_edited_pdf():
+    """Serve the most recently edited PDF (if exists)."""
+    if not EDITED_PDF.exists():
+        raise HTTPException(status_code=404, detail="Обработанный PDF ещё не создан")
+    return FileResponse(EDITED_PDF, media_type="application/pdf")
 
 
 @app.get("/status")
@@ -198,7 +220,7 @@ def search_pdf(request: SearchRequest):
     """Return top_k semantic search hits for the given query."""
     if MODEL is None or INDEX is None or CHUNKS is None:
         raise HTTPException(status_code=503, detail="Индекс ещё не готов")
-    if not query_is_valid(request.query):
+    if not request.query.strip():
         raise HTTPException(status_code=400, detail="query не должен быть пустым")
 
     print(f"Поиск: {request.query!r}, top_k={request.top_k}")
@@ -225,6 +247,61 @@ def search_pdf(request: SearchRequest):
     return {"query": request.query, "results": results}
 
 
-def query_is_valid(q: str) -> bool:
-    """Check if query string is non-empty."""
-    return bool(q and q.strip())
+@app.post("/find_matches")
+def find_matches_endpoint(request: FindMatchesRequest):
+    """Find all occurrences of old_text in the current PDF."""
+    if not request.old_text or not request.old_text.strip():
+        raise HTTPException(status_code=400, detail="old_text не должен быть пустым")
+
+    pdf_path = _active_pdf_path()
+    print(f"Поиск вхождений: {request.old_text!r} в {pdf_path.name}")
+
+    matches = find_matches(str(pdf_path), request.old_text)
+    print(f"Найдено совпадений: {len(matches)}")
+
+    return {
+        "old_text": request.old_text,
+        "matches": matches,
+        "total": len(matches),
+    }
+
+
+@app.post("/replace")
+def replace_endpoint(request: ReplaceRequest):
+    """Replace selected occurrences of old_text with new_text."""
+    if not request.old_text or not request.old_text.strip():
+        raise HTTPException(status_code=400, detail="old_text не должен быть пустым")
+    if not request.new_text:
+        raise HTTPException(status_code=400, detail="new_text не должен быть пустым")
+    if not request.selected_ids:
+        raise HTTPException(status_code=400, detail="Не выбрано ни одного совпадения")
+
+    pdf_path = _active_pdf_path()
+    print(
+        f"Замена: {request.old_text!r} → {request.new_text!r}, "
+        f"ids={request.selected_ids}"
+    )
+
+    try:
+        report = replace_matches(
+            str(pdf_path),
+            str(EDITED_PDF),
+            request.old_text,
+            request.new_text,
+            request.selected_ids,
+        )
+    except Exception as exc:
+        print(f"Ошибка замены: {exc}")
+        raise HTTPException(status_code=500, detail=f"Ошибка замены: {exc}")
+
+    print(
+        f"Заменено: {report['replaced_count']}, пропущено: {report['skipped_count']}"
+    )
+
+    return {
+        "status": "ok",
+        "replaced_count": report["replaced_count"],
+        "skipped_count": report["skipped_count"],
+        "skipped": report["skipped"],
+        "download_url": "/static/edited.pdf",
+    }

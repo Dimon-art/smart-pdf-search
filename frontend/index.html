@@ -60,6 +60,23 @@
       margin-top: 6px;
       min-height: 15px;
     }
+    .progress-bar {
+      display: none;
+      width: 100%;
+      height: 8px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+    .progress-bar.visible { display: block; }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4a90e2, #6fa8dc);
+      width: 0%;
+      transition: width 0.3s ease;
+      border-radius: 4px;
+    }
     .query-block { display: flex; gap: 8px; margin-bottom: 15px; }
     #query {
       flex: 1;
@@ -144,6 +161,9 @@
       <label for="pdfFile">Загрузить свой PDF</label>
       <input id="pdfFile" type="file" accept="application/pdf">
       <div id="uploadStatus"></div>
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
     </div>
 
     <div class="query-block">
@@ -160,6 +180,18 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
 
+    const STAGE_LABELS = {
+      uploading: "Загрузка файла",
+      parsing: "Разбор PDF",
+      chunking: "Разбивка на чанки",
+      embedding: "Генерация эмбеддингов",
+      saving: "Сохранение индекса",
+      loading_cache: "Загрузка из кэша",
+      ready: "Готово",
+      error: "Ошибка",
+      idle: "Ожидание",
+    };
+
     const queryInput = document.getElementById("query");
     const searchBtn = document.getElementById("searchBtn");
     const statusEl = document.getElementById("status");
@@ -168,15 +200,23 @@
     const pdfNameEl = document.getElementById("pdfName");
     const pdfFileInput = document.getElementById("pdfFile");
     const uploadStatusEl = document.getElementById("uploadStatus");
+    const progressBar = document.getElementById("progressBar");
+    const progressFill = document.getElementById("progressFill");
 
     let pdfDoc = null;
     let pageWrappers = {};
     let highlightLayers = {};
+    let pollTimer = null;
+    let lastPdfName = null;
+
+    async function fetchStatus() {
+      const r = await fetch("/status");
+      return await r.json();
+    }
 
     async function updatePdfName() {
       try {
-        const r = await fetch("/status");
-        const data = await r.json();
+        const data = await fetchStatus();
         pdfNameEl.textContent =
           (data.pdf_name || "PDF") + " · чанков: " + (data.chunks_count || 0);
       } catch (err) {
@@ -186,7 +226,6 @@
 
     async function loadPdf() {
       try {
-        // Очищаем viewer и словари
         viewerEl.innerHTML = "";
         pageWrappers = {};
         highlightLayers = {};
@@ -367,6 +406,49 @@
       }
     }
 
+    function setProgress(stage, progress) {
+      const label = STAGE_LABELS[stage] || stage;
+      if (stage === "ready") {
+        uploadStatusEl.textContent = label;
+        progressFill.style.width = "100%";
+        setTimeout(() => progressBar.classList.remove("visible"), 1000);
+      } else if (stage === "error") {
+        uploadStatusEl.textContent = "Ошибка: " + label;
+        progressBar.classList.remove("visible");
+      } else {
+        uploadStatusEl.textContent = label + " (" + progress + "%)";
+        progressBar.classList.add("visible");
+        progressFill.style.width = progress + "%";
+      }
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    async function pollStatus() {
+      try {
+        const data = await fetchStatus();
+        setProgress(data.stage, data.progress);
+
+        if (!data.running && data.stage === "ready") {
+          stopPolling();
+          await updatePdfName();
+          await loadPdf();
+          resultsEl.innerHTML = "";
+          statusEl.textContent = "PDF обновлён. Введите запрос.";
+        } else if (data.stage === "error") {
+          stopPolling();
+          uploadStatusEl.textContent = "Ошибка: " + (data.error || "неизвестная");
+        }
+      } catch (err) {
+        console.error("Poll error:", err);
+      }
+    }
+
     async function handleUpload() {
       const file = pdfFileInput.files[0];
       if (!file) return;
@@ -378,6 +460,8 @@
 
       uploadStatusEl.textContent =
         "Загрузка: " + file.name + " (" + (file.size / 1024 / 1024).toFixed(1) + " МБ)...";
+      progressBar.classList.add("visible");
+      progressFill.style.width = "0%";
 
       const formData = new FormData();
       formData.append("file", file);
@@ -393,17 +477,13 @@
           throw new Error(err.detail || "HTTP " + response.status);
         }
 
-        const data = await response.json();
-        uploadStatusEl.textContent =
-          "Готово: " + data.pdf_name + " (чанков: " + data.chunks_count + ")";
-
-        // Перезагружаем PDF и обновляем имя
-        await updatePdfName();
-        await loadPdf();
-        resultsEl.innerHTML = "";
-        statusEl.textContent = "PDF обновлён. Введите запрос.";
+        // Начинаем polling
+        stopPolling();
+        pollTimer = setInterval(pollStatus, 2000);
+        pollStatus();
       } catch (err) {
         uploadStatusEl.textContent = "Ошибка: " + err.message;
+        progressBar.classList.remove("visible");
       } finally {
         pdfFileInput.value = "";
       }

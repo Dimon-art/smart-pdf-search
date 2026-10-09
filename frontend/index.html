@@ -538,6 +538,61 @@
       letter-spacing: 0.06em;
     }
 
+    /* ============ TEXT PREVIEW (для DOCX/TXT/MD) ============ */
+    #textViewer {
+      display: none;
+      width: 100%;
+      max-width: 780px;
+      margin: 0 auto;
+      text-align: left;
+    }
+
+    #textViewer.visible { display: block; }
+
+    .text-page {
+      background: white;
+      border-radius: 8px;
+      padding: 28px 32px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 16px rgba(10, 37, 64, 0.08);
+      border: 1px solid var(--border);
+    }
+
+    .text-page-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--gray);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .text-block {
+      font-size: 14px;
+      line-height: 1.65;
+      color: var(--text);
+      margin-bottom: 10px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .text-block:last-child { margin-bottom: 0; }
+
+    .text-block mark {
+      background: rgba(255, 179, 71, 0.55);
+      border-bottom: 1px solid rgba(255, 140, 0, 0.8);
+      padding: 1px 2px;
+      border-radius: 2px;
+      color: inherit;
+    }
+
+    .text-block.active-block mark {
+      background: rgba(255, 107, 31, 0.5);
+      border-bottom-color: var(--orange);
+    }
+
     .viewer-empty {
       position: absolute;
       top: 40px;
@@ -594,7 +649,6 @@
       );
     }
 
-    /* Правка 2: карточка 520px */
     .viewer-empty-content {
       position: relative;
       z-index: 2;
@@ -622,7 +676,6 @@
       box-shadow: 0 10px 28px rgba(255, 107, 31, 0.35);
     }
 
-    /* Правка 3: иконка 48px */
     .viewer-empty-icon svg {
       width: 48px;
       height: 48px;
@@ -633,7 +686,6 @@
       stroke-linejoin: round;
     }
 
-    /* Правка 1: text-wrap balance */
     .viewer-empty-title {
       font-size: 27px;
       font-weight: 700;
@@ -753,6 +805,14 @@
       background: var(--gray-light);
       color: var(--gray);
       cursor: not-allowed;
+    }
+
+    .field-hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--gray);
+      line-height: 1.4;
+      min-height: 16px;
     }
 
     .matches-list {
@@ -879,7 +939,7 @@
         <h1>Умный <span class="accent">поиск</span> на страницах</h1>
       </div>
       <div class="subtitle">
-        Найдите нужное место в PDF и отредактируйте его
+        Найдите нужное место в документе и отредактируйте его
       </div>
       <div class="pdf-meta">
         <span class="pdf-name" id="pdfName">загрузка...</span>
@@ -902,8 +962,8 @@
       </div>
 
       <div class="upload-block">
-        <label for="pdfFile">Загрузить свой PDF</label>
-        <input id="pdfFile" type="file" accept="application/pdf">
+        <label for="pdfFile">Загрузить документ (PDF, DOCX, TXT, MD)</label>
+        <input id="pdfFile" type="file" accept=".pdf,.docx,.txt,.md">
         <div id="uploadStatus"></div>
         <div class="progress-bar" id="progressBar">
           <div class="progress-bar-fill" id="progressFill"></div>
@@ -913,7 +973,7 @@
       <div class="how-it-works">
         <div class="how-it-works-title">Как это работает</div>
         <ol>
-          <li>Загрузите PDF или используйте sample.pdf</li>
+          <li>Загрузите документ (PDF, DOCX, TXT, MD) или используйте sample.pdf</li>
           <li>Опишите, что ищете — своими словами</li>
           <li>Мы покажем найденные места прямо в документе</li>
           <li>При необходимости — заменим текст и дадим скачать</li>
@@ -931,6 +991,7 @@
       <span class="v-info" id="viewerInfo"></span>
     </div>
     <div id="viewer"></div>
+    <div id="textViewer"></div>
 
     <div class="viewer-empty" id="viewerEmpty">
       <div class="viewer-empty-content">
@@ -942,8 +1003,8 @@
           </svg>
         </div>
         <div class="viewer-empty-title">Здесь появится найденный фрагмент</div>
-        <div class="viewer-empty-text">
-          Введите запрос слева — мы покажем страницу PDF<br>
+        <div class="viewer-empty-text" id="viewerEmptyText">
+          Введите запрос слева — мы покажем страницу документа<br>
           с выделенным найденным текстом
         </div>
         <div class="viewer-empty-examples" id="viewerExamples">
@@ -957,16 +1018,17 @@
 
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal">
-      <h2>Замена текста в PDF</h2>
+      <h2 id="modalTitle">Замена текста в документе</h2>
 
       <div class="modal-field">
-        <label>Искать в PDF</label>
+        <label>Искать в документе</label>
         <input id="modalOldText" type="text" readonly>
       </div>
 
       <div class="modal-field">
         <label>Заменить на</label>
         <input id="modalNewText" type="text" placeholder="Введите новый текст...">
+        <div class="field-hint" id="newTextHint"></div>
       </div>
 
       <div class="modal-field">
@@ -978,7 +1040,8 @@
 
       <div class="modal-actions">
         <button class="btn btn-secondary" id="modalCancel">Отмена</button>
-        <button class="btn btn-primary" id="modalReplace" disabled>Заменить выбранные</button>
+        <button class="btn btn-primary" id="modalReplace" disabled
+                title="Введите текст и отметьте хотя бы одно совпадение">Заменить выбранные</button>
       </div>
     </div>
   </div>
@@ -990,7 +1053,7 @@
 
     const STAGE_LABELS = {
       uploading: "Загрузка файла",
-      parsing: "Разбор PDF",
+      parsing: "Разбор документа",
       chunking: "Разбивка на чанки",
       embedding: "Генерация эмбеддингов",
       saving: "Сохранение индекса",
@@ -1005,7 +1068,9 @@
     const statusEl = document.getElementById("status");
     const resultsEl = document.getElementById("results");
     const viewerEl = document.getElementById("viewer");
+    const textViewerEl = document.getElementById("textViewer");
     const viewerEmpty = document.getElementById("viewerEmpty");
+    const viewerEmptyText = document.getElementById("viewerEmptyText");
     const pdfNameEl = document.getElementById("pdfName");
     const viewerNameEl = document.getElementById("viewerName");
     const viewerInfoEl = document.getElementById("viewerInfo");
@@ -1015,6 +1080,7 @@
     const progressFill = document.getElementById("progressFill");
     const examplesEl = document.getElementById("examples");
     const viewerExamplesEl = document.getElementById("viewerExamples");
+    const modalTitle = document.getElementById("modalTitle");
 
     const modalOverlay = document.getElementById("modalOverlay");
     const modalOldText = document.getElementById("modalOldText");
@@ -1024,6 +1090,7 @@
     const modalStatus = document.getElementById("modalStatus");
     const modalCancel = document.getElementById("modalCancel");
     const modalReplace = document.getElementById("modalReplace");
+    const newTextHint = document.getElementById("newTextHint");
 
     let pdfDoc = null;
     let pageWrappers = {};
@@ -1032,28 +1099,74 @@
     let currentOldText = "";
     let firstSearchDone = false;
 
+    // Текущий тип документа и его свойства
+    let currentDocType = "pdf";              // pdf | docx | txt | md
+    let currentSupportsHighlight = true;     // true только для pdf
+
+    // Для текстового превью
+    let textPagesCache = [];                 // [{page, blocks:[{text}]}]
+    let textBlockEls = {};                   // "page:block" -> DOM-элемент
+
     async function fetchStatus() {
       const r = await fetch("/status");
       return await r.json();
     }
 
-    async function updatePdfName() {
+    function extOf(name) {
+      if (!name) return "pdf";
+      const m = String(name).toLowerCase().match(/\.([a-z0-9]+)$/);
+      return m ? m[1] : "pdf";
+    }
+
+    async function updateHeaderInfo() {
       try {
         const data = await fetchStatus();
-        const name = data.pdf_name || "PDF";
+        const name = data.pdf_name || "документ";
+        currentDocType = data.document_type || extOf(name);
+        currentSupportsHighlight = data.supports_highlight !== false;
         pdfNameEl.textContent = name;
         viewerNameEl.textContent = name;
+        updateViewerInfo(data);
+        updateEmptyStateText();
       } catch (err) {
-        pdfNameEl.textContent = "PDF";
+        pdfNameEl.textContent = "документ";
       }
     }
 
-    async function loadPdf() {
-      try {
-        viewerEl.innerHTML = "";
-        pageWrappers = {};
-        highlightLayers = {};
+    function updateViewerInfo(data) {
+      if (!data) { viewerInfoEl.textContent = ""; return; }
+      if (currentDocType === "pdf") {
+        if (pdfDoc) viewerInfoEl.textContent = "Страниц: " + pdfDoc.numPages;
+      } else {
+        const chunks = (data && data.chunks_count) || 0;
+        viewerInfoEl.textContent =
+          "Тип: " + currentDocType.toUpperCase() +
+          (chunks ? " · чанков: " + chunks : "");
+      }
+    }
 
+    function updateEmptyStateText() {
+      if (currentDocType === "pdf") {
+        viewerEmptyText.innerHTML =
+          "Введите запрос слева — мы покажем страницу PDF<br>" +
+          "с выделенным найденным текстом";
+      } else {
+        viewerEmptyText.innerHTML =
+          "Введите запрос слева — мы покажем блоки документа<br>" +
+          "с подсвеченным найденным текстом";
+      }
+    }
+
+    // ============ PDF ============
+
+    async function loadPdf() {
+      viewerEl.style.display = "flex";
+      textViewerEl.classList.remove("visible");
+      viewerEl.innerHTML = "";
+      pageWrappers = {};
+      highlightLayers = {};
+
+      try {
         const cacheBuster = "?t=" + Date.now();
         pdfDoc = await pdfjsLib.getDocument("/static/current.pdf" + cacheBuster).promise;
         viewerInfoEl.textContent = "Страниц: " + pdfDoc.numPages;
@@ -1110,6 +1223,14 @@
     }
 
     function highlightResult(result) {
+      if (currentDocType === "pdf") {
+        highlightPdfResult(result);
+      } else {
+        highlightTextResult(result);
+      }
+    }
+
+    function highlightPdfResult(result) {
       clearHighlights();
       if (!result.bboxes || !result.bboxes.length) return;
 
@@ -1155,6 +1276,175 @@
       }
     }
 
+    // ============ TEXT PREVIEW (DOCX/TXT/MD) ============
+
+    async function loadTextPreview() {
+      viewerEl.innerHTML = "";
+      viewerEl.style.display = "none";
+      textViewerEl.classList.add("visible");
+      textViewerEl.innerHTML = "";
+      textPagesCache = [];
+      textBlockEls = {};
+
+      const ext = currentDocType;
+      const url = "/static/current." + ext + "?t=" + Date.now();
+
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const text = await resp.text();
+
+        const rawBlocks = text
+          .split(/\n\s*\n/)
+          .map((b) => b.trim())
+          .filter(Boolean);
+
+        const PAGE_SIZE = 40;
+        for (let i = 0; i < rawBlocks.length; i += PAGE_SIZE) {
+          textPagesCache.push({
+            page: i / PAGE_SIZE,
+            blocks: rawBlocks.slice(i, i + PAGE_SIZE).map((t) => ({ text: t })),
+          });
+        }
+        if (!textPagesCache.length) {
+          textPagesCache.push({ page: 0, blocks: [{ text: "" }] });
+        }
+
+        renderTextPreview();
+        viewerInfoEl.textContent =
+          "Тип: " + ext.toUpperCase() +
+          " · блоков: " + rawBlocks.length;
+        console.log("Текстовый превью загружен:", rawBlocks.length, "блоков");
+      } catch (err) {
+        console.error("Ошибка загрузки текста:", err);
+        statusEl.textContent = "Не удалось загрузить документ: " + err.message;
+      }
+    }
+
+    function renderTextPreview() {
+      textViewerEl.innerHTML = "";
+      textBlockEls = {};
+
+      textPagesCache.forEach((page) => {
+        const pageDiv = document.createElement("div");
+        pageDiv.className = "text-page";
+
+        const label = document.createElement("div");
+        label.className = "text-page-label";
+        label.textContent = "Фрагмент " + (page.page + 1);
+        pageDiv.appendChild(label);
+
+        page.blocks.forEach((block, bi) => {
+          const blockDiv = document.createElement("div");
+          blockDiv.className = "text-block";
+          blockDiv.textContent = block.text || " ";
+          const key = page.page + ":" + bi;
+          blockDiv.dataset.key = key;
+          textBlockEls[key] = blockDiv;
+          pageDiv.appendChild(blockDiv);
+        });
+
+        textViewerEl.appendChild(pageDiv);
+      });
+    }
+
+    function highlightTextResult(result) {
+      Object.values(textBlockEls).forEach((el) => {
+        el.classList.remove("active-block");
+        if (el.dataset.original !== undefined) {
+          el.textContent = el.dataset.original;
+          delete el.dataset.original;
+        }
+      });
+
+      const refs = result && result.block_refs;
+      if (!Array.isArray(refs) || !refs.length) {
+        return;
+      }
+
+      let firstHit = null;
+      const needle = (result.chunk || "").trim();
+
+      for (const [page, blockIdx] of refs) {
+        const key = page + ":" + blockIdx;
+        const el = textBlockEls[key];
+        if (!el) continue;
+
+        const applied = markExactOrOverlap(el, needle);
+        if (applied && !firstHit) firstHit = el;
+      }
+
+      if (firstHit) {
+        firstHit.classList.add("active-block");
+        firstHit.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+
+    function markExactOrOverlap(el, needle) {
+      if (el.dataset.original === undefined) {
+        el.dataset.original = el.textContent;
+      }
+      const original = el.dataset.original;
+      if (!original) return false;
+
+      const lowerOrig = original.toLowerCase();
+      const lowerNeedle = (needle || "").toLowerCase();
+
+      const probe = lowerNeedle.slice(0, 80);
+      if (probe.length >= 3) {
+        const idx = lowerOrig.indexOf(probe);
+        if (idx !== -1) {
+          paintMark(el, original, idx, probe.length);
+          return true;
+        }
+      }
+
+      if (lowerNeedle.length > 80) {
+        const tail = lowerNeedle.slice(-80);
+        const idx2 = lowerOrig.indexOf(tail);
+        if (idx2 !== -1) {
+          paintMark(el, original, idx2, tail.length);
+          return true;
+        }
+      }
+
+      const words = lowerNeedle.split(/\s+/).filter((w) => w.length >= 5);
+      for (const w of words) {
+        const i = lowerOrig.indexOf(w);
+        if (i !== -1) {
+          paintMark(el, original, i, w.length);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function paintMark(el, original, start, length) {
+      const before = original.slice(0, start);
+      const hit = original.slice(start, start + length);
+      const after = original.slice(start + length);
+
+      el.innerHTML = "";
+      if (before) el.appendChild(document.createTextNode(before));
+      const mark = document.createElement("mark");
+      mark.textContent = hit;
+      el.appendChild(mark);
+      if (after) el.appendChild(document.createTextNode(after));
+    }
+
+    // ============ Общая загрузка после переключения типа ============
+
+    async function reloadViewerForCurrentType() {
+      viewerEmpty.classList.add("hidden");
+      if (currentDocType === "pdf") {
+        await loadPdf();
+      } else {
+        await loadTextPreview();
+      }
+    }
+
+    // ============ Search ============
+
     async function doSearch() {
       const query = queryInput.value.trim();
       if (!query) {
@@ -1168,7 +1458,16 @@
       }
 
       resultsEl.querySelectorAll(".result").forEach((c) => c.remove());
-      clearHighlights();
+      if (currentDocType === "pdf") clearHighlights();
+      else {
+        Object.values(textBlockEls).forEach((el) => {
+          el.classList.remove("active-block");
+          if (el.dataset.original !== undefined) {
+            el.textContent = el.dataset.original;
+            delete el.dataset.original;
+          }
+        });
+      }
       statusEl.textContent = "Поиск...";
       searchBtn.disabled = true;
 
@@ -1183,6 +1482,11 @@
 
         const data = await response.json();
         const results = data.results || [];
+
+        if (data.document_type) {
+          currentDocType = data.document_type;
+          currentSupportsHighlight = data.supports_highlight !== false;
+        }
 
         if (!results.length) {
           statusEl.textContent = "Ничего не найдено";
@@ -1203,12 +1507,14 @@
           pageBadge.className = "page-badge";
           const pages = item.pages || [];
           if (pages.length === 1) {
-            pageBadge.textContent = "Страница " + pages[0];
+            pageBadge.textContent = currentDocType === "pdf"
+              ? "Страница " + pages[0]
+              : "Фрагмент " + (pages[0] + 1);
           } else if (pages.length > 1) {
-            pageBadge.textContent = "Страницы " + pages.slice(0, 3).join(", ") +
-              (pages.length > 3 ? "…" : "");
+            pageBadge.textContent = (currentDocType === "pdf" ? "Страницы " : "Фрагменты ") +
+              pages.slice(0, 3).join(", ") + (pages.length > 3 ? "…" : "");
           } else {
-            pageBadge.textContent = "Страница ?";
+            pageBadge.textContent = currentDocType === "pdf" ? "Страница ?" : "Фрагмент ?";
           }
 
           const scoreSpan = document.createElement("span");
@@ -1256,6 +1562,8 @@
       }
     }
 
+    // ============ Upload / polling ============
+
     function setProgress(stage, progress) {
       const label = STAGE_LABELS[stage] || stage;
       if (stage === "ready") {
@@ -1286,9 +1594,9 @@
 
         if (!data.running && data.stage === "ready") {
           stopPolling();
-          await updatePdfName();
-          await loadPdf();
-          statusEl.textContent = "PDF обновлён. Введите запрос.";
+          await updateHeaderInfo();
+          await reloadViewerForCurrentType();
+          statusEl.textContent = "Документ обновлён. Введите запрос.";
         } else if (data.stage === "error") {
           stopPolling();
           uploadStatusEl.textContent = "Ошибка: " + (data.error || "неизвестная");
@@ -1302,8 +1610,9 @@
       const file = pdfFileInput.files[0];
       if (!file) return;
 
-      if (!file.name.toLowerCase().endsWith(".pdf")) {
-        uploadStatusEl.textContent = "Только PDF-файлы";
+      const ext = extOf(file.name);
+      if (!["pdf", "docx", "txt", "md"].includes(ext)) {
+        uploadStatusEl.textContent = "Разрешены: PDF, DOCX, TXT, MD";
         return;
       }
 
@@ -1337,6 +1646,8 @@
       }
     }
 
+    // ============ Replace modal ============
+
     async function openReplaceModal() {
       const query = queryInput.value.trim();
       if (!query) {
@@ -1351,6 +1662,17 @@
       matchCount.textContent = "0";
       modalStatus.textContent = "Поиск совпадений...";
       modalReplace.disabled = true;
+      // Сброс состояния кнопки (если была в режиме «Готово»)
+      modalReplace.textContent = "Заменить выбранные";
+      modalReplace.onclick = doReplace;
+      if (newTextHint) newTextHint.textContent = "Введите текст, на который нужно заменить";
+
+      if (currentDocType === "pdf") {
+        modalTitle.textContent = "Замена текста в PDF";
+      } else {
+        modalTitle.textContent = "Замена текста в " + currentDocType.toUpperCase();
+      }
+
       modalOverlay.classList.add("visible");
 
       try {
@@ -1388,7 +1710,11 @@
           const lbl = document.createElement("label");
           const meta = document.createElement("span");
           meta.className = "match-meta";
-          meta.textContent = "Стр. " + (m.page + 1);
+          if (currentDocType === "pdf") {
+            meta.textContent = "Стр. " + (m.page + 1);
+          } else {
+            meta.textContent = "Фрагмент " + (m.page + 1);
+          }
           lbl.appendChild(meta);
           lbl.appendChild(document.createTextNode(" · " + (m.context || "(без контекста)")));
           lbl.prepend(cb);
@@ -1409,6 +1735,25 @@
     function updateReplaceBtnState() {
       const anyChecked = matchesList.querySelector("input[type=checkbox]:checked") !== null;
       const hasNew = modalNewText.value.trim().length > 0;
+
+      // Подсказка под полем «Заменить на»
+      if (newTextHint) {
+        newTextHint.textContent = hasNew
+          ? ""
+          : "Введите текст, на который нужно заменить";
+      }
+
+      // Причина, по которой кнопка заблокирована (tooltip)
+      let reason = "";
+      if (!hasNew && !anyChecked) {
+        reason = "Введите текст и отметьте хотя бы одно совпадение";
+      } else if (!hasNew) {
+        reason = "Введите текст для замены";
+      } else if (!anyChecked) {
+        reason = "Отметьте хотя бы одно совпадение";
+      }
+      modalReplace.title = reason;
+
       modalReplace.disabled = !(anyChecked && hasNew);
     }
 
@@ -1416,6 +1761,11 @@
       modalOverlay.classList.remove("visible");
       modalStatus.textContent = "";
       matchesList.innerHTML = "";
+      // Сбросить кнопку, если она была в режиме «Готово»
+      modalReplace.textContent = "Заменить выбранные";
+      modalReplace.onclick = doReplace;
+      modalReplace.disabled = true;
+      if (newTextHint) newTextHint.textContent = "";
     }
 
     async function doReplace() {
@@ -1454,7 +1804,8 @@
         }
 
         const data = await response.json();
-        const dlUrl = data.download_url + "?t=" + Date.now();
+        const dlUrl = (data.download_url || "/static/edited.pdf") + "?t=" + Date.now();
+        const label = (data.document_type || currentDocType).toUpperCase();
 
         let msg = "Заменено: " + data.replaced_count;
         if (data.skipped_count > 0) {
@@ -1462,7 +1813,14 @@
         }
 
         modalStatus.innerHTML =
-          msg + ' · <a href="' + dlUrl + '" download>Скачать PDF</a>';
+          msg + ' · <a href="' + dlUrl + '" download>Скачать ' + label + '</a>';
+
+        // Кнопка → «Готово» → закрывает модалку
+        modalReplace.disabled = false;
+        modalReplace.textContent = "Готово";
+        modalReplace.title = "";
+        modalReplace.onclick = () => closeModal();
+        if (newTextHint) newTextHint.textContent = "";
       } catch (err) {
         modalStatus.textContent = "Ошибка: " + err.message;
         modalReplace.disabled = false;
@@ -1499,8 +1857,16 @@
     });
     pdfFileInput.addEventListener("change", handleUpload);
 
-    updatePdfName();
-    loadPdf();
+    // ============ Init ============
+
+    (async () => {
+      await updateHeaderInfo();
+      if (currentDocType === "pdf") {
+        await loadPdf();
+      } else {
+        await loadTextPreview();
+      }
+    })();
   </script>
 </body>
 </html>

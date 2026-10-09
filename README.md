@@ -39,13 +39,40 @@ PDF  →  чанки  →  эмбеддинги  →  FAISS  →  поиск  �
 
 ## Быстрый старт
 
-### Требования
+### Через Docker (рекомендуется)
+
+```bash
+git clone https://github.com/Dimon-art/smart-pdf-search.git
+cd smart-pdf-search
+docker compose up -d
+```
+
+Открыть **http://localhost:8000**
+
+При первом запуске модель эмбеддингов скачается автоматически (~470 МБ).  
+Дальше контейнер переиспользует кэш — стартует за 3–5 секунд.
+
+Полезные команды:
+
+```bash
+docker compose logs -f      # логи
+docker compose down         # остановить
+docker compose up -d        # запустить в фоне
+```
+
+**Требования:** Docker Desktop с WSL 2.
+
+---
+
+### Вручную (для разработки)
+
+**Требования:**
 
 - Python **3.10+**
 - ~1 ГБ свободного места (модель эмбеддингов ~470 МБ)
 - Git
 
-### Установка
+**Установка**
 
 ```bash
 # Клонировать
@@ -116,6 +143,9 @@ smart-pdf-search/
 │   └── index.html               # UI: поиск, PDF viewer, модалка замены
 ├── docs/
 │   └── screenshots/             # Скриншоты для README
+├── Dockerfile                   # Сборка образа
+├── .dockerignore                # Исключения для образа
+├── docker-compose.yml           # Запуск одной командой
 ├── sample.pdf                   # Демо-документ (отчёт Мюллера, 448 стр.)
 └── README.md
 ```
@@ -140,7 +170,7 @@ smart-pdf-search/
 - [x] Загрузка своего PDF
 - [x] Прогресс-бар обработки (polling)
 - [x] Кэш эмбеддингов
-- [ ] Docker-compose
+- [x] Docker-compose
 - [ ] DOCX / TXT / Markdown
 - [ ] Мультизагрузка (несколько PDF одновременно)
 - [ ] Экспорт PDF со всеми подсветками

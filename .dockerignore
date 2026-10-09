@@ -1,0 +1,44 @@
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Кэши
+.cache/
+backend/cache/
+backend/uploads/
+models/
+*.bin
+*.npy
+*.index
+
+# Документация (не нужна в образе)
+docs/
+*.md
+!README.md
+
+# Не-PDF файлы
+*.log
+.env
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore

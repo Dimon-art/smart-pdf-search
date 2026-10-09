@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    container_name: smart-pdf-search
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - ./backend/cache:/app/backend/cache
+      - ./backend/uploads:/app/backend/uploads
+      - ./sample.pdf:/app/sample.pdf:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_HUB_DISABLE_SYMLINKS_WARNING=1
+    restart: unless-stopped
+
+volumes:
+  hf_cache:

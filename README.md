@@ -11,8 +11,6 @@
 
 ![Главный экран](docs/screenshots/1-main.png)
 
-![Главный экран](docs/screenshots/1-main.png)
-
 ---
 
 ## Возможности

@@ -22,7 +22,14 @@ Thumbs.db
 *.pdf
 .env
 *.log
+
 # Model cache
 .cache/
 models/
 *.bin
+*.npy
+*.index
+
+# Backend cache & uploads
+backend/cache/
+backend/uploads/

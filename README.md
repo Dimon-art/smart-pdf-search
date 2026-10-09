@@ -1,8 +1,15 @@
 # Умный поиск на страницах
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
 Семантический поиск по документам: ищет не по буквам, а **по смыслу**.  
 Работает с **PDF, DOCX, TXT и Markdown**. Подсвечивает найденное прямо в документе
 и позволяет заменить текст — всё в браузере.
+
+![Главный экран](docs/screenshots/1-main.png)
 
 ![Главный экран](docs/screenshots/1-main.png)
 

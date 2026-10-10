@@ -1,6 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 fastapi
 uvicorn
 pymupdf
 sentence-transformers
 faiss-cpu
 python-multipart
+python-docx

@@ -33,3 +33,8 @@ models/
 # Backend cache & uploads
 backend/cache/
 backend/uploads/
+make_small_pdf.py
+test.txt
+# Local dev artifacts
+make_small_pdf.py
+test.txt

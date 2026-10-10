@@ -1,5 +1,7 @@
 """PDF text editing: find text matches and replace them via redaction."""
 
+import re
+
 import pymupdf
 
 MIN_FONTSIZE = 6
@@ -7,6 +9,61 @@ DEFAULT_FONTSIZE = 11
 FONT_NAME = "helv"
 FILL_COLOR = (1, 1, 1)
 CONTEXT_WINDOW = 30
+
+
+def _search_variants(text: str) -> list[str]:
+    """Возвращает варианты запроса для поиска в PDF.
+
+    PyMuPDF page.search_for() ищет по «сырому» тексту PDF. Если PDF был
+    сгенерирован с неразрывными пробелами (\\xa0), то обычный запрос
+    «ответственность сторон» не найдётся — нужно искать «ответственность\\xa0сторон».
+
+    Возвращает список вариантов в порядке приоритета.
+    """
+    if not text:
+        return [text]
+
+    base = text.replace("\xa0", " ").replace("\u202f", " ").strip()
+    # Схлопываем множественные пробелы
+    base = re.sub(r"\s+", " ", base)
+
+    variants = [base]  # «ответственность сторон»
+    if " " in base:
+        variants.append(base.replace(" ", "\xa0"))  # «ответственность\xa0сторон»
+    # NBSP-only вариант (на случай если base не содержит пробелов вообще)
+    variants.append(base.replace("\xa0", " "))
+
+    # Уникализируем, сохраняя порядок
+    seen = set()
+    unique = []
+    for v in variants:
+        if v and v not in seen:
+            seen.add(v)
+            unique.append(v)
+    return unique
+
+
+def _search_in_page(page: pymupdf.Page, old_text: str) -> list[pymupdf.Rect]:
+    """Ищет old_text на странице, перебирая варианты пробелов.
+
+    Возвращает список прямоугольников. Дубликаты (если вариант 1 и вариант 2
+    нашли один и тот же rect) отсеиваются.
+    """
+    all_rects = []
+    seen_rects = set()
+    for variant in _search_variants(old_text):
+        try:
+            rects = page.search_for(variant)
+        except Exception:
+            continue
+        for r in rects:
+            # ключ округления — чтобы не дублировать близкие прямоугольники
+            key = (round(r.x0, 1), round(r.y0, 1), round(r.x1, 1), round(r.y1, 1))
+            if key in seen_rects:
+                continue
+            seen_rects.add(key)
+            all_rects.append(r)
+    return all_rects
 
 
 def fit_fontsize(
@@ -59,7 +116,7 @@ def _extract_context(page: pymupdf.Page, rect: pymupdf.Rect, window: int = CONTE
     start_i = max(0, closest_idx - 5)
     end_i = min(len(words), closest_idx + 6)
     snippet_words = [w[4] for w in words[start_i:end_i]]
-    snippet = " ".join(snippet_words)
+    snippet = " ".join(snippet_words).replace("\xa0", " ")
 
     if len(snippet) > window * 2:
         snippet = snippet[: window * 2] + "..."
@@ -87,7 +144,7 @@ def find_matches(input_path: str, old_text: str) -> list[dict]:
 
     try:
         for page_num, page in enumerate(doc):
-            for rect in page.search_for(old_text):
+            for rect in _search_in_page(page, old_text):
                 matches.append({
                     "id": match_id,
                     "page": page_num,
@@ -133,7 +190,7 @@ def replace_matches(
     by_page: dict[int, list[pymupdf.Rect]] = {}
     match_id = 0
     for page_num, page in enumerate(doc):
-        for rect in page.search_for(old_text):
+        for rect in _search_in_page(page, old_text):
             if match_id in selected_set:
                 by_page.setdefault(page_num, []).append(rect)
             match_id += 1

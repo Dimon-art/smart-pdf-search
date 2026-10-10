@@ -509,7 +509,7 @@
       background: white;
       box-shadow: 0 10px 30px rgba(10, 37, 64, 0.18);
       border-radius: 3px;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .page-wrapper canvas { display: block; }
@@ -519,13 +519,52 @@
       top: 0;
       left: 0;
       pointer-events: none;
+      overflow: visible;
     }
 
+    /* Блочный слой — бледный контекст */
     .highlight {
       position: absolute;
+      background: rgba(255, 179, 71, 0.10);
+      border: 1px solid rgba(255, 179, 71, 0.45);
+      border-radius: 3px;
+      box-shadow: none;
+    }
+
+    /* Точечный слой — яркое точное вхождение */
+    .highlight-focus {
+      position: absolute;
       background: rgba(255, 179, 71, 0.45);
-      border: 1px solid rgba(255, 140, 0, 0.8);
-      border-radius: 2px;
+      border: 2px solid rgba(255, 107, 31, 0.95);
+      border-radius: 3px;
+      box-shadow: 0 0 0 3px rgba(255, 179, 71, 0.25);
+    }
+
+    /* Метка с номером результата рядом с подсветкой */
+    .highlight-marker {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 6px;
+      background: var(--orange);
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      border-radius: 11px;
+      border: 2px solid white;
+      box-shadow: 0 2px 6px rgba(255, 107, 31, 0.5);
+      pointer-events: none;
+      z-index: 10;
+      white-space: nowrap;
+    }
+
+    .highlight-marker::before {
+      content: "📍";
+      font-size: 11px;
+      margin-right: 4px;
     }
 
     .page-number {
@@ -1051,6 +1090,8 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
 
+    const PDF_SCALE = 1.2;
+
     const STAGE_LABELS = {
       uploading: "Загрузка файла",
       parsing: "Разбор документа",
@@ -1099,13 +1140,11 @@
     let currentOldText = "";
     let firstSearchDone = false;
 
-    // Текущий тип документа и его свойства
-    let currentDocType = "pdf";              // pdf | docx | txt | md
-    let currentSupportsHighlight = true;     // true только для pdf
+    let currentDocType = "pdf";
+    let currentSupportsHighlight = true;
 
-    // Для текстового превью
-    let textPagesCache = [];                 // [{page, blocks:[{text}]}]
-    let textBlockEls = {};                   // "page:block" -> DOM-элемент
+    let textPagesCache = [];
+    let textBlockEls = {};
 
     async function fetchStatus() {
       const r = await fetch("/status");
@@ -1183,7 +1222,7 @@
 
     async function renderPage(num) {
       const page = await pdfDoc.getPage(num);
-      const viewport = page.getViewport({ scale: 0.75 });
+      const viewport = page.getViewport({ scale: PDF_SCALE });
 
       const wrapper = document.createElement("div");
       wrapper.className = "page-wrapper";
@@ -1222,49 +1261,94 @@
       }
     }
 
-    function highlightResult(result) {
+    function highlightResult(result, resultIndex) {
       if (currentDocType === "pdf") {
-        highlightPdfResult(result);
+        highlightPdfResult(result, resultIndex);
       } else {
         highlightTextResult(result);
       }
     }
 
-    function highlightPdfResult(result) {
+    function highlightPdfResult(result, resultIndex) {
       clearHighlights();
       if (!result.bboxes || !result.bboxes.length) return;
 
-      const byPage = {};
+      const badgeNumber = (resultIndex != null) ? (resultIndex + 1) : 1;
+
+      // ---- 1. Блочный слой (бледный) ----
+      const byPageBlock = {};
       for (const b of result.bboxes) {
-        if (!byPage[b.page]) byPage[b.page] = [];
-        byPage[b.page].push(b.bbox);
+        if (!byPageBlock[b.page]) byPageBlock[b.page] = [];
+        byPageBlock[b.page].push(b.bbox);
+      }
+
+      // ---- 2. Focus слой (яркий) ----
+      const byPageFocus = {};
+      const focus = result.focus_bboxes || [];
+      for (const b of focus) {
+        if (!byPageFocus[b.page]) byPageFocus[b.page] = [];
+        byPageFocus[b.page].push(b.bbox);
       }
 
       let firstPage = null;
-      for (const pageNumStr in byPage) {
+      const allPages = new Set([
+        ...Object.keys(byPageBlock),
+        ...Object.keys(byPageFocus),
+      ]);
+
+      for (const pageNumStr of allPages) {
         const pageNum = parseInt(pageNumStr, 10);
         const layer = highlightLayers[pageNum];
         if (!layer) continue;
 
-        const viewport = layer.pdfPage.getViewport({ scale: 0.75 });
+        const viewport = layer.pdfPage.getViewport({ scale: PDF_SCALE });
 
-        for (const bbox of byPage[pageNumStr]) {
-          const [x0, y0, x1, y1] = bbox;
-          const [cx0, cy0] = viewport.convertToViewportPoint(x0, y0);
-          const [cx1, cy1] = viewport.convertToViewportPoint(x1, y1);
-
-          const left = Math.min(cx0, cx1);
-          const top = Math.min(cy0, cy1);
-          const width = Math.abs(cx1 - cx0);
-          const height = Math.abs(cy1 - cy0);
-
+        // --- 1. Рисуем бледный блок ---
+        for (const bbox of (byPageBlock[pageNumStr] || [])) {
+          const rect = _pdfRectToScreen(bbox, viewport);
+          if (!rect) continue;
           const div = document.createElement("div");
           div.className = "highlight";
-          div.style.left = left + "px";
-          div.style.top = top + "px";
-          div.style.width = width + "px";
-          div.style.height = height + "px";
+          div.style.left = rect.left + "px";
+          div.style.top = rect.top + "px";
+          div.style.width = rect.width + "px";
+          div.style.height = rect.height + "px";
           layer.el.appendChild(div);
+        }
+
+        // --- 2. Рисуем яркую подсветку точных вхождений ---
+        const focusList = byPageFocus[pageNumStr] || [];
+        for (const bbox of focusList) {
+          const rect = _pdfRectToScreen(bbox, viewport);
+          if (!rect) continue;
+          const div = document.createElement("div");
+          div.className = "highlight-focus";
+          div.style.left = rect.left + "px";
+          div.style.top = rect.top + "px";
+          div.style.width = rect.width + "px";
+          div.style.height = rect.height + "px";
+          layer.el.appendChild(div);
+        }
+
+        // --- 3. Метка с номером — одна на страницу, у верхней подсветки ---
+        const allRectsOnPage = [];
+        for (const bbox of (byPageBlock[pageNumStr] || [])) {
+          const r = _pdfRectToScreen(bbox, viewport);
+          if (r) allRectsOnPage.push(r);
+        }
+        for (const bbox of focusList) {
+          const r = _pdfRectToScreen(bbox, viewport);
+          if (r) allRectsOnPage.push(r);
+        }
+        if (allRectsOnPage.length) {
+          const topY = Math.min(...allRectsOnPage.map(r => r.top));
+          const leftX = Math.min(...allRectsOnPage.map(r => r.left));
+          const marker = document.createElement("div");
+          marker.className = "highlight-marker";
+          marker.textContent = String(badgeNumber);
+          marker.style.left = Math.max(0, leftX - 34) + "px";
+          marker.style.top = Math.max(0, topY - 4) + "px";
+          layer.el.appendChild(marker);
         }
 
         if (firstPage === null || pageNum < firstPage) firstPage = pageNum;
@@ -1272,8 +1356,46 @@
 
       if (firstPage !== null) {
         const target = pageWrappers[firstPage];
-        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (target) {
+          setTimeout(() => {
+            viewerEl.scrollTo({
+              top: target.offsetTop - 20,
+              behavior: "smooth",
+            });
+          }, 80);
+        }
       }
+    }
+
+    // Вспомогательная: PDF-точки -> экранные пиксели
+       function _pdfRectToScreen(bbox, viewport) {
+      if (!bbox || bbox.length !== 4) return null;
+      const [x0, y0, x1, y1] = bbox;
+      const [cx0, cy0] = viewport.convertToViewportPoint(x0, y0);
+      const [cx1, cy1] = viewport.convertToViewportPoint(x1, y1);
+
+      const left = Math.min(cx0, cx1);
+      const right = Math.max(cx0, cx1);
+
+      // PDF.js в нашем случае может отдавать cy от НИЗА страницы
+      // (инверсия из-за cropbox или rotate). Определяем порядок:
+      // если cy0 > cy1 — инверсия, пересчитываем через viewport.height.
+      let top, bottom;
+      if (cy0 <= cy1) {
+        top = cy0;
+        bottom = cy1;
+      } else {
+        top = viewport.height - cy0;
+        bottom = viewport.height - cy1;
+        if (top > bottom) [top, bottom] = [bottom, top];
+      }
+
+      return {
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+      };
     }
 
     // ============ TEXT PREVIEW (DOCX/TXT/MD) ============
@@ -1548,7 +1670,7 @@
           card.addEventListener("click", () => {
             document.querySelectorAll(".result").forEach((c) => c.classList.remove("active"));
             card.classList.add("active");
-            highlightResult(item);
+            highlightResult(item, i);
           });
 
           resultsEl.appendChild(card);
@@ -1662,7 +1784,6 @@
       matchCount.textContent = "0";
       modalStatus.textContent = "Поиск совпадений...";
       modalReplace.disabled = true;
-      // Сброс состояния кнопки (если была в режиме «Готово»)
       modalReplace.textContent = "Заменить выбранные";
       modalReplace.onclick = doReplace;
       if (newTextHint) newTextHint.textContent = "Введите текст, на который нужно заменить";
@@ -1736,14 +1857,12 @@
       const anyChecked = matchesList.querySelector("input[type=checkbox]:checked") !== null;
       const hasNew = modalNewText.value.trim().length > 0;
 
-      // Подсказка под полем «Заменить на»
       if (newTextHint) {
         newTextHint.textContent = hasNew
           ? ""
           : "Введите текст, на который нужно заменить";
       }
 
-      // Причина, по которой кнопка заблокирована (tooltip)
       let reason = "";
       if (!hasNew && !anyChecked) {
         reason = "Введите текст и отметьте хотя бы одно совпадение";
@@ -1761,7 +1880,6 @@
       modalOverlay.classList.remove("visible");
       modalStatus.textContent = "";
       matchesList.innerHTML = "";
-      // Сбросить кнопку, если она была в режиме «Готово»
       modalReplace.textContent = "Заменить выбранные";
       modalReplace.onclick = doReplace;
       modalReplace.disabled = true;
@@ -1815,7 +1933,6 @@
         modalStatus.innerHTML =
           msg + ' · <a href="' + dlUrl + '" download>Скачать ' + label + '</a>';
 
-        // Кнопка → «Готово» → закрывает модалку
         modalReplace.disabled = false;
         modalReplace.textContent = "Готово";
         modalReplace.title = "";

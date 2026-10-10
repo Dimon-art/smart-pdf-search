@@ -1,9 +1,11 @@
 import hashlib
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
+import pymupdf
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -27,17 +29,34 @@ UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 DEFAULT_PDF = BASE_DIR / "sample.pdf"
 MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
-MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
-CHUNKS = None
-INDEX = None
-MODEL = None
-CURRENT_PDF_NAME = None
-DOCUMENT_TYPE = "pdf"          # pdf | docx | txt | md
-SUPPORTS_HIGHLIGHT = True
-PAGES_CACHE: Optional[list] = None   # структура pages для не-PDF (и для PDF тоже пригодится)
+STOPWORDS = {
+    "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а",
+    "то", "все", "она", "так", "его", "но", "да", "ты", "к", "у", "же",
+    "вы", "за", "бы", "по", "только", "ее", "мне", "было", "вот", "от",
+    "меня", "еще", "нет", "о", "из", "ему", "теперь", "когда", "даже",
+    "ну", "вдруг", "ли", "если", "уже", "или", "ни", "быть", "был",
+    "него", "до", "вас", "нибудь", "опять", "уж", "вам", "ведь", "там",
+    "потом", "себя", "ничего", "ей", "может", "они", "тут", "где",
+    "есть", "надо", "ней", "для", "мы", "тебя", "их", "чем", "была",
+    "сам", "чтоб", "без", "будто", "чего", "раз", "тоже", "себе",
+    "под", "будет", "ж", "тогда", "кто", "этот", "того", "потому",
+    "этого", "какой", "совсем", "ним", "здесь", "этом", "один", "почти",
+    "мой", "тем", "чтобы", "нее", "сейчас", "были", "куда", "зачем",
+    "всех", "никогда", "можно", "при", "наконец", "два", "об", "другой",
+    "хоть", "после", "над", "больше", "тот", "через", "эти", "нас",
+    "про", "всего", "них", "какая", "много", "разве", "три", "эту",
+    "моя", "впрочем", "хорошо", "свою", "этой", "перед", "иногда",
+    "лучше", "чуть", "том", "нельзя", "такой", "им", "более", "всегда",
+    "конечно", "всю", "между", "the", "a", "an", "of", "to", "in",
+    "on", "at", "for", "and", "or", "is", "are", "was", "were", "be",
+    "been", "being", "with", "by", "from", "as", "this", "that", "these",
+    "those", "it", "its", "which", "who", "whom", "whose",
+}
+
 
 JOB_STATE = {
     "running": False,
@@ -45,6 +64,14 @@ JOB_STATE = {
     "progress": 0,
     "error": None,
 }
+
+CHUNKS = None
+INDEX = None
+MODEL = None
+CURRENT_PDF_NAME = None
+DOCUMENT_TYPE = "pdf"
+SUPPORTS_HIGHLIGHT = True
+PAGES_CACHE: Optional[list] = None
 
 
 class SearchRequest(BaseModel):
@@ -68,12 +95,7 @@ def _set_stage(stage: str, progress: int) -> None:
     print(f"[job] {stage} — {progress}%")
 
 
-# ---------------------------------------------------------------------------
-# Пути для активного документа
-# ---------------------------------------------------------------------------
-
 def _current_path() -> Path:
-    """Активный исходный файл (для PDF/DOCX/TXT/MD)."""
     ext = DOCUMENT_TYPE if DOCUMENT_TYPE else "pdf"
     p = UPLOADS_DIR / f"current.{ext}"
     if p.exists():
@@ -86,48 +108,28 @@ def _edited_path() -> Path:
     return UPLOADS_DIR / f"edited.{ext}"
 
 
-# ---------------------------------------------------------------------------
-# PDF-путь (как было)
-# ---------------------------------------------------------------------------
-
 def _blocks_from_pdf(pdf_path: Path) -> list[dict]:
     blocks = extract_blocks_with_pages(str(pdf_path))
     print(f"PDF-блоков: {len(blocks)}")
     return blocks
 
 
-# ---------------------------------------------------------------------------
-# Не-PDF путь (DOCX/TXT/MD) — блоки без bbox
-# ---------------------------------------------------------------------------
-
 def _blocks_from_document(doc_path: Path) -> tuple[list[dict], list[dict]]:
-    """
-    Возвращает (blocks, pages).
-    blocks — плоский список в формате pdf_parser: {"text", "page", "bbox"}.
-    pages  — структура из document_parser для find_matches/replace.
-    """
     parsed = parse_document(str(doc_path))
     pages = parsed["pages"]
     blocks: list[dict] = []
     for page in pages:
         for b in page["blocks"]:
-            blocks.append(
-                {
-                    "text": b["text"],
-                    "page": page["page"],
-                    "bbox": b.get("bbox"),  # None для не-PDF
-                }
-            )
+            blocks.append({
+                "text": b["text"],
+                "page": page["page"],
+                "bbox": b.get("bbox"),
+            })
     print(f"Блоков ({parsed['type']}): {len(blocks)}")
     return blocks, pages
 
 
-# ---------------------------------------------------------------------------
-# Сборка индекса
-# ---------------------------------------------------------------------------
-
 def _build_index_for_document(doc_path: Path, doc_name: str) -> None:
-    """Универсальная сборка индекса: PDF и DOCX/TXT/MD."""
     global CHUNKS, INDEX, MODEL, CURRENT_PDF_NAME
     global DOCUMENT_TYPE, SUPPORTS_HIGHLIGHT, PAGES_CACHE
 
@@ -145,10 +147,8 @@ def _build_index_for_document(doc_path: Path, doc_name: str) -> None:
         chunks, _embeddings, index = cached
         print("Загружено из кэша")
         model = SentenceTransformer(MODEL_NAME)
-
-        # pages всё равно пересоберём (нужны для /find_matches и /replace)
         if DOCUMENT_TYPE == "pdf":
-            PAGES_CACHE = None  # для PDF pages берём из pdf_editor
+            PAGES_CACHE = None
         else:
             _, PAGES_CACHE = _blocks_from_document(doc_path)
     else:
@@ -194,19 +194,15 @@ def startup() -> None:
 
 
 def _process_upload(doc_bytes: bytes, doc_name: str) -> None:
-    """Background task: сохраняет файл с правильным расширением и строит индекс."""
     global DOCUMENT_TYPE
     try:
         ext = Path(doc_name).suffix.lower()
         if ext not in ALLOWED_EXTENSIONS:
             raise ValueError(f"Неподдерживаемое расширение: {ext}")
 
-        # Сначала выставляем тип, чтобы _current_path() знал имя
         DOCUMENT_TYPE = ext.lstrip(".")
 
-        # Сохраняем как uploads/current.<ext>
         target = UPLOADS_DIR / f"current{ext}"
-        # Удаляем старые current.* чтобы не путались
         for old in UPLOADS_DIR.glob("current.*"):
             try:
                 old.unlink()
@@ -221,6 +217,119 @@ def _process_upload(doc_bytes: bytes, doc_name: str) -> None:
         print(f"Ошибка обработки upload: {exc}")
     finally:
         JOB_STATE["running"] = False
+
+
+# ---------------------------------------------------------------------------
+# Подсветка: двухуровневая (блок + точное вхождение)
+# ---------------------------------------------------------------------------
+
+def _significant_words(query: str) -> list[str]:
+    """Возвращает значимые слова из запроса (без стоп-слов), длиной >= 3."""
+    words = re.findall(r"\w+", query.lower())
+    result = []
+    for w in words:
+        if len(w) < 3:
+            continue
+        if w in STOPWORDS:
+            continue
+        result.append(w)
+    return result
+
+
+def _overlaps_any(rect: pymupdf.Rect, bboxes: list[dict], page_num: int) -> bool:
+    """Пересекается ли rect с каким-либо bbox'ом чанка на этой странице?"""
+    for b in bboxes:
+        if b.get("page") != page_num:
+            continue
+        bbox = b.get("bbox")
+        if not bbox:
+            continue
+        try:
+            other = pymupdf.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+        except Exception:
+            continue
+        if rect.intersects(other):
+            return True
+    return False
+
+
+def _compute_focus_bboxes(query: str, chunk: dict) -> list[dict]:
+    """
+    Находит ТОЧНЫЕ вхождения значимых слов запроса в блоках чанка.
+
+    Отличие от старой версии: работает через page.search_for(word, clip=block_rect)
+    для каждого блока отдельно, что исключает "улетание" bbox'ов в чужие блоки.
+
+    Возвращает список [{"page": int, "bbox": [x0,y0,x1,y1]}, ...].
+    Может вернуть пустой список — это нормально.
+    """
+    original_bboxes = chunk.get("bboxes") or []
+    if not original_bboxes:
+        return []
+
+    # Уникальные значимые слова
+    words = _significant_words(query)
+    if not words:
+        return []
+
+    try:
+        doc = pymupdf.open(str(_current_path()))
+    except Exception:
+        return []
+
+    focus: list[dict] = []
+    seen_keys: set[tuple] = set()
+
+    try:
+        for orig in original_bboxes:
+            page_num = orig.get("page")
+            block_bbox = orig.get("bbox")
+            if page_num is None or block_bbox is None:
+                continue
+            if page_num <= 0 or page_num > doc.page_count:
+                continue
+
+            # PDF-страница в pymupdf 0-based
+            page = doc[page_num - 1]
+
+            try:
+                clip = pymupdf.Rect(
+                    block_bbox[0], block_bbox[1],
+                    block_bbox[2], block_bbox[3],
+                )
+            except Exception:
+                continue
+
+            for word in words:
+                try:
+                    # Ищем слово ТОЛЬКО внутри блока (clip)
+                    hits = page.search_for(word, clip=clip)
+                except Exception:
+                    continue
+                for r in hits:
+                    key = (
+                        page_num,
+                        round(r.x0, 1),
+                        round(r.y0, 1),
+                        round(r.x1, 1),
+                        round(r.y1, 1),
+                    )
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    focus.append({
+                        "page": page_num,
+                        "bbox": [
+                            round(r.x0, 2),
+                            round(r.y0, 2),
+                            round(r.x1, 2),
+                            round(r.y1, 2),
+                        ],
+                    })
+    finally:
+        doc.close()
+
+    return focus
 
 
 # ---------------------------------------------------------------------------
@@ -318,9 +427,16 @@ def search_document(request: SearchRequest):
             "chunk": r["chunk"],
         }
         if idx is not None:
-            item["pages"] = CHUNKS[idx].get("pages")
-            item["bboxes"] = CHUNKS[idx].get("bboxes")
-            item["block_refs"] = CHUNKS[idx].get("block_refs") or []
+            chunk = CHUNKS[idx]
+            item["pages"] = chunk.get("pages")
+            item["block_refs"] = chunk.get("block_refs") or []
+            item["bboxes"] = chunk.get("bboxes") or []
+
+            # Точечная подсветка (для PDF) — отдельный массив
+            if DOCUMENT_TYPE == "pdf":
+                item["focus_bboxes"] = _compute_focus_bboxes(request.query, chunk)
+            else:
+                item["focus_bboxes"] = []
         results.append(item)
 
     return {
@@ -336,7 +452,6 @@ def search_document(request: SearchRequest):
 # ---------------------------------------------------------------------------
 
 def _find_matches_text(old_text: str) -> list[dict]:
-    """Поиск old_text по блокам не-PDF документа."""
     matches: list[dict] = []
     needle = old_text
     lower = needle.lower()
@@ -351,15 +466,13 @@ def _find_matches_text(old_text: str) -> list[dict]:
                     break
                 ctx_from = max(0, pos - 40)
                 ctx_to = min(len(text), pos + len(needle) + 40)
-                matches.append(
-                    {
-                        "id": counter,
-                        "page": page["page"],
-                        "block": bi,
-                        "bbox": None,
-                        "context": text[ctx_from:ctx_to],
-                    }
-                )
+                matches.append({
+                    "id": counter,
+                    "page": page["page"],
+                    "block": bi,
+                    "bbox": None,
+                    "context": text[ctx_from:ctx_to],
+                })
                 counter += 1
                 start = pos + max(1, len(needle))
     return matches
@@ -393,7 +506,6 @@ def find_matches_endpoint(request: FindMatchesRequest):
 # ---------------------------------------------------------------------------
 
 def _replace_text(old_text: str, new_text: str, selected_ids: list[int]) -> dict:
-    """Замена в PAGES_CACHE + пересборка page['text']. Возвращает отчёт."""
     global PAGES_CACHE
     selected = set(selected_ids)
     replaced = 0
@@ -406,7 +518,6 @@ def _replace_text(old_text: str, new_text: str, selected_ids: list[int]) -> dict
         for block in page["blocks"]:
             t = block["text"]
             if old_text in t:
-                # сколько раз old_text встречается в этом блоке
                 occurrences = t.count(old_text)
                 for _ in range(occurrences):
                     if counter in selected:
@@ -418,16 +529,13 @@ def _replace_text(old_text: str, new_text: str, selected_ids: list[int]) -> dict
                     (i in selected)
                     for i in range(counter - occurrences, counter)
                 ):
-                    # заменяем все вхождения (упрощённо)
                     t = t.replace(old_text, new_text)
             new_blocks.append({"text": t, "bbox": block.get("bbox")})
-        new_pages.append(
-            {
-                "page": page["page"],
-                "text": "\n".join(b["text"] for b in new_blocks),
-                "blocks": new_blocks,
-            }
-        )
+        new_pages.append({
+            "page": page["page"],
+            "text": "\n".join(b["text"] for b in new_blocks),
+            "blocks": new_blocks,
+        })
 
     PAGES_CACHE = new_pages
     _write_replaced_file()
@@ -449,7 +557,7 @@ def _write_replaced_file() -> None:
             for block in page["blocks"]:
                 doc.add_paragraph(block["text"])
         doc.save(str(out))
-    else:  # txt / md
+    else:
         text = "\n\n".join(p["text"] for p in (PAGES_CACHE or []))
         out.write_text(text, encoding="utf-8")
 
@@ -482,10 +590,6 @@ def replace_endpoint(request: ReplaceRequest):
             print(f"Ошибка замены: {exc}")
             raise HTTPException(status_code=500, detail=f"Ошибка замены: {exc}")
 
-        print(
-            f"Заменено: {report['replaced_count']}, "
-            f"пропущено: {report['skipped_count']}"
-        )
         return {
             "status": "ok",
             "replaced_count": report["replaced_count"],
@@ -495,16 +599,11 @@ def replace_endpoint(request: ReplaceRequest):
             "document_type": "pdf",
         }
 
-    # DOCX / TXT / MD
     print(
         f"Замена ({DOCUMENT_TYPE}): {request.old_text!r} → {request.new_text!r}, "
         f"ids={request.selected_ids}"
     )
     report = _replace_text(request.old_text, request.new_text, request.selected_ids)
-    print(
-        f"Заменено: {report['replaced_count']}, "
-        f"пропущено: {report['skipped_count']}"
-    )
     return {
         "status": "ok",
         "replaced_count": report["replaced_count"],

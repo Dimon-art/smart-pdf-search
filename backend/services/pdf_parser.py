@@ -33,7 +33,7 @@ def extract_pages_with_bbox(pdf_path: str) -> list[dict]:
                 x0, y0, x1, y1 = block["bbox"]
                 blocks.append(
                     {
-                        "text": text,
+                        "text": _normalize_ws(text),
                         "bbox": [
                             round(x0, 2),
                             round(y0, 2),
@@ -58,8 +58,27 @@ def extract_pages_with_bbox(pdf_path: str) -> list[dict]:
         doc.close()
 
 
+def _normalize_ws(text: str) -> str:
+    """Заменить все нестандартные пробелы (NBSP, узкий NBSP, табы) на обычные.
+
+    PyMuPDF при извлечении текста может возвращать \\xa0 (NBSP),
+    \\u202f (narrow NBSP), \\u2009 (thin space) и другие. Для поиска
+    и подсветки удобнее работать с обычными пробелами.
+    """
+    if not text:
+        return text
+    return (
+        text.replace("\xa0", " ")   # non-breaking space
+            .replace("\u202f", " ")  # narrow no-break space
+            .replace("\u2009", " ")  # thin space
+            .replace("\u2007", " ")  # figure space
+            .replace("\t", " ")      # tab
+    )
+
+
 def clean_text(text: str) -> str:
     """Normalize whitespace: collapse spaces and newlines, then strip."""
+    text = _normalize_ws(text)
     text = re.sub(r" +", " ", text)
     text = re.sub(r"\n+", "\n", text)
     return text.strip()
